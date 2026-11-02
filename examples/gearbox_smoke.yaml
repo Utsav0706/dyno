@@ -1,0 +1,25 @@
+# Three short prompts with checkable answers, to see Gearbox's routing through Dyno.
+# Costs well under 1p. Needs Gearbox running (py -m gearbox.service, port 8002):
+#   dyno run examples/gearbox_smoke.yaml
+
+name: gearbox-smoke
+agent: gearbox
+k: 1
+scorers:
+  - task_success: {mode: contains}
+  - cost_latency
+cases:
+  - id: arithmetic
+    input: What is 17 multiplied by 23? Reply with the number only.
+    expected: "391"
+    tags: [easy]
+
+  - id: capital
+    input: What is the capital of Australia? Reply with the city name only.
+    expected: Canberra
+    tags: [easy]
+
+  - id: prime-check
+    input: Is 221 a prime number? Answer yes or no, then give its factors if it has any.
+    expected: ["no", "13", "17"]
+    tags: [reasoning]

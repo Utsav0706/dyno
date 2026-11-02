@@ -232,7 +232,7 @@ def to_markdown(r: Report) -> str:
         f"| {r.cases} | {r.attempts} | {r.errors} | {_pct(r.attempt_pass_rate)} | "
         f"{_pct(r.pass_at_k)} | {_pct(r.pass_hat_k)} | {len(r.flaky)} |",
         "",
-        f"Cost: GBP {_num(r.cost_gbp, '.4f')} total, GBP {_num(r.cost_per_attempt_gbp, '.4f')} "
+        f"Cost: GBP {_num(r.cost_gbp, '.6f')} total, GBP {_num(r.cost_per_attempt_gbp, '.6f')} "
         f"per attempt, tokens {r.input_tokens} in / {r.output_tokens} out, "
         f"latency p50 {_num(r.latency_p50_s, '.1f')}s, p95 {_num(r.latency_p95_s, '.1f')}s",
         "",

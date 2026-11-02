@@ -50,18 +50,31 @@ def run(
     k: Annotated[
         int | None, typer.Option("--k", min=1, help="Attempts per case (default: suite's k).")
     ] = None,
+    tags: Annotated[
+        list[str] | None, typer.Option("--tags", help="Only cases with any of these tags.")
+    ] = None,
+    ids: Annotated[list[str] | None, typer.Option("--ids", help="Only these case ids.")] = None,
 ) -> None:
-    """Run every case in a suite k times; score and store each attempt and its steps."""
-    suite = load_suite(suite_path)
+    """Run every case in a suite k times; score and store each attempt and its steps.
+
+    --tags and --ids repeat: `--ids a --ids b`.
+    """
+    try:
+        suite = load_suite(suite_path).select(tags=tags, ids=ids)
+        scorers = build_scorers(suite.scorers)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     agent_name = agent or suite.agent
     if not agent_name:
         raise typer.BadParameter("no agent: pass --agent or set 'agent' in the suite")
     repeats = k or suite.k
-    try:
-        scorers = build_scorers(suite.scorers)
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc)) from exc
     store = _store()
+    try:
+        # Adapters connect (and Scout signs up) here: fail before any case runs.
+        the_agent = get_agent(agent_name)
+    except Exception as exc:
+        typer.echo(f"agent {agent_name!r} failed to start: {exc}", err=True)
+        raise typer.Exit(1) from exc
 
     total = len(suite.cases) * repeats
     done = 0
@@ -75,7 +88,10 @@ def run(
             attempt_passed([sc.passed for sc in scores.values()])
         ]
         failed = [name for name, sc in scores.items() if sc.passed is False]
-        why = f" ({', '.join(failed)})" if failed else ""
+        if result.error:
+            why = f" (agent error: {result.error[:120]})"
+        else:
+            why = f" ({', '.join(failed)})" if failed else ""
         typer.echo(
             f"[{done}/{total}] {case_id} #{attempt}  {verdict}{why}  {latency_ms / 1000:.1f}s",
             err=True,
@@ -83,7 +99,7 @@ def run(
 
     s = run_suite(
         suite,
-        get_agent(agent_name),
+        the_agent,
         agent_name=agent_name,
         k=repeats,
         store=store,
@@ -93,7 +109,7 @@ def run(
     typer.echo(
         f"run {s.run_id}: {s.suite} x{s.k} with {s.agent}: {s.attempts} attempts, "
         f"{s.passed} passed, {s.errors} errors, {s.input_tokens}+{s.output_tokens} tokens, "
-        f"GBP {s.cost_gbp:.4f}, {s.seconds:.1f}s"
+        f"GBP {s.cost_gbp:.6f}, {s.seconds:.1f}s"
     )
 
 

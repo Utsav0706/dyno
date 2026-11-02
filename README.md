@@ -10,9 +10,10 @@ Not just "was the final answer right?" but: did it use the right tools, in a sen
 number of steps, without making things up, at what cost, and does it pass every time
 or only sometimes?
 
-Status: **M2, deterministic scorers and reports**: YAML cases, the `Agent` protocol,
+Status: **M3, Scout and Gearbox adapters**: YAML cases, the `Agent` protocol,
 `dyno run` with k repeats, every attempt and step stored in SQLite, four deterministic
-scorers, pass@k / pass^k, and `dyno report`. Next: HTTP adapters for Scout and Gearbox.
+scorers, pass@k / pass^k, `dyno report`, and HTTP adapters for Scout and Gearbox.
+Next: an eval workflow for Scout's document cases, then LLM judge scorers.
 One of four connected
 projects: [Scout](https://github.com/Utsav0706/scout) (research agent),
 [Gearbox](https://github.com/Utsav0706/gearbox) (LLM router), Dyno (eval harness) and
@@ -87,4 +88,19 @@ class MyAgent:
 
 Run it with `dyno run suite.yaml --agent mypackage.agents:MyAgent`. The case format is
 documented at the top of [src/dyno/cases.py](src/dyno/cases.py), and an example is in
-[examples/example_suite.yaml](examples/example_suite.yaml).
+[examples/example_suite.yaml](examples/example_suite.yaml). Run part of a suite with
+`--tags web --tags docs` or `--ids case-1 --ids case-2`.
+
+## Built-in adapters
+
+| Agent | Talks to | Each attempt |
+|---|---|---|
+| `scout` | Scout's API (`SCOUT_URL`, default `http://127.0.0.1:8001`) | signs up a fresh user per run, uploads PDFs from `SCOUT_CORPUS_DIR` if set, starts a research job, waits for it, then reads its trajectory (every model and tool call) |
+| `gearbox` | Gearbox's OpenAI-style API (`GEARBOX_URL`, default `http://127.0.0.1:8002`) | one chat completion with `model: auto`; the chosen model, cost and routing reason come from Gearbox's headers |
+
+Scout's golden set is already in Dyno's format:
+
+```powershell
+.venv\Scripts\dyno.exe run "..\scout\eval\golden.yaml" --agent scout --tags web
+.venv\Scripts\dyno.exe run examples\gearbox_smoke.yaml
+```

@@ -65,3 +65,15 @@ def test_config_hash_tracks_what_runs():
 def test_numeric_expected_becomes_text():
     assert _suite(expected=42).cases[0].expected == "42"
     assert _suite(expected=[1999, "GBP 3.60"]).cases[0].expected == ["1999", "GBP 3.60"]
+
+
+def test_select_by_tags_and_ids():
+    suite = load_suite(EXAMPLE_SUITE)
+    assert [c.id for c in suite.select(tags=["math"]).cases] == ["math-add", "math-precedence"]
+    picked = suite.select(tags=["facts"], ids=["fact-capital", "math-add"])
+    assert [c.id for c in picked.cases] == ["fact-capital"]
+    assert picked.config_hash("a", 1) != suite.config_hash("a", 1)
+    with pytest.raises(ValueError, match="unknown case ids"):
+        suite.select(ids=["nope"])
+    with pytest.raises(ValueError, match="no cases match"):
+        suite.select(tags=["nope"])

@@ -96,6 +96,22 @@ class Suite(BaseModel):
                 raise ValueError(f"case {c.id}: {sorted(both)} in both must_call and must_not_call")
         return self
 
+    def select(self, tags: list[str] | None = None, ids: list[str] | None = None) -> Suite:
+        """The cases with any of `tags` and (if given) one of `ids`. Unknown ids are errors,
+        so a typo can't silently shrink a run. The config hash then covers only these."""
+        if ids:
+            unknown = set(ids) - {c.id for c in self.cases}
+            if unknown:
+                raise ValueError(f"unknown case ids: {sorted(unknown)}")
+        cases = [
+            c
+            for c in self.cases
+            if (not ids or c.id in ids) and (not tags or set(tags) & set(c.tags))
+        ]
+        if not cases:
+            raise ValueError(f"no cases match tags={tags} ids={ids}")
+        return self.model_copy(update={"cases": cases})
+
     def config_hash(self, agent: str, k: int) -> str:
         """Fingerprint of what a run executes: the cases, scorers, agent and k.
 

@@ -75,3 +75,11 @@ def test_bad_scorer_fails_before_running(monkeypatch, db_url, tmp_path):
     suite.write_text("agent: example\nscorers: [nope]\ncases:\n  - {id: a, input: q}\n")
     result = _invoke(monkeypatch, db_url, str(suite))
     assert result.exit_code != 0 and "unknown scorer" in result.output
+
+
+def test_run_with_ids_and_agent_that_cannot_start(monkeypatch, db_url):
+    result = _invoke(monkeypatch, db_url, str(EXAMPLE_SUITE), "--ids", "math-add", "--k", "2")
+    assert result.exit_code == 0 and "2 attempts, 2 passed" in result.stdout
+    monkeypatch.setenv("GEARBOX_URL", "http://127.0.0.1:9")  # nothing listens on port 9
+    bad = _invoke(monkeypatch, db_url, str(EXAMPLE_SUITE), "--agent", "gearbox")
+    assert bad.exit_code == 1 and "failed to start" in bad.output

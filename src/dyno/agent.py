@@ -47,8 +47,12 @@ class Agent(Protocol):
 
 def _registry() -> dict[str, str]:
     # name -> "module:attribute". Strings, so an adapter's dependencies are only
-    # imported when that adapter is used. Scout and Gearbox join in M3.
-    return {"example": "dyno.agents.example:ExampleAgent"}
+    # imported when that adapter is used.
+    return {
+        "example": "dyno.agents.example:ExampleAgent",
+        "scout": "dyno.agents.scout:ScoutAgent",
+        "gearbox": "dyno.agents.gearbox:GearboxAgent",
+    }
 
 
 def get_agent(name: str) -> Agent:
