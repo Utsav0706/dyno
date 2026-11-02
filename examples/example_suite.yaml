@@ -1,0 +1,50 @@
+# A small suite for the built-in example agent. Free and deterministic:
+#   dyno run examples/example_suite.yaml --agent example --k 3
+#
+# Some cases are meant to fail once scorers exist (M2), so reports have something to show.
+
+name: example
+agent: example
+k: 1
+cases:
+  - id: math-add
+    input: What is 17 + 25?
+    expected: The answer is 42.
+    must_call: [calculator]
+    max_steps: 4
+    tags: [math]
+
+  - id: math-precedence
+    input: Work out 2 + 3 * 4
+    expected: The answer is 14.
+    must_call: [calculator]
+    max_steps: 4
+    tags: [math]
+
+  - id: fact-capital
+    input: What is the capital of France?
+    expected: Paris.
+    must_call: [lookup]
+    must_not_call: [calculator]
+    max_steps: 4
+    tags: [facts]
+
+  # Fails tool_correctness: the agent has no fact for this, so it never calls lookup.
+  - id: fact-unknown
+    input: What is the capital of Peru?
+    expected: Lima.
+    must_call: [lookup]
+    tags: [facts, expected-fail]
+
+  # Fails trajectory_efficiency: the agent takes 4 steps.
+  - id: fact-step-budget
+    input: What is the speed of light?
+    expected: 299,792,458 metres per second.
+    max_steps: 2
+    tags: [facts, expected-fail]
+
+  # The agent raises on this input; the runner records the error and carries on.
+  - id: agent-crash
+    input: Please crash now.
+    expected: anything
+    tags: [errors, expected-fail]

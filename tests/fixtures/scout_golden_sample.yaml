@@ -1,0 +1,22 @@
+# Three cases copied verbatim from scout/eval/golden.yaml (2026-10-28), so CI checks
+# that Dyno still loads Scout's format without needing the Scout repo.
+
+cases:
+  - id: web-minimum-wage-start
+    input: When did the UK National Minimum Wage come into force, and what was the main adult hourly rate at the start?
+    expected:
+      - It came into force on 1 April 1999.
+      - The main adult rate was GBP 3.60 an hour (for workers aged 22 and over).
+    must_call: [web_search]
+    tags: [web, ci]
+
+  - id: docs-london-hotel-cap
+    input: According to my documents, what is the most Quillmere will reimburse for a hotel night in London?
+    expected:
+      - GBP 190 per night, excluding breakfast.
+    must_call: [rag_search]
+    tags: [docs, ci]
+
+  - id: none-future-wimbledon
+    input: Who won the men's singles title at Wimbledon in 2029?
+    tags: [unanswerable]
