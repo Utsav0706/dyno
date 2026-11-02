@@ -83,3 +83,27 @@ def test_run_with_ids_and_agent_that_cannot_start(monkeypatch, db_url):
     monkeypatch.setenv("GEARBOX_URL", "http://127.0.0.1:9")  # nothing listens on port 9
     bad = _invoke(monkeypatch, db_url, str(EXAMPLE_SUITE), "--agent", "gearbox")
     assert bad.exit_code == 1 and "failed to start" in bad.output
+
+
+def test_cases_from_another_file_and_score_with_a_suite(monkeypatch, db_url, tmp_path):
+    settings = tmp_path / "settings.yaml"
+    settings.write_text("agent: example\nscorers: [task_success]\n", encoding="utf-8")
+    result = _invoke(monkeypatch, db_url, str(settings), "--cases", str(EXAMPLE_SUITE))
+    assert result.exit_code == 0, result.output
+    assert "6 attempts" in result.stdout
+    run_id = result.stdout.strip().splitlines()[-1].split()[1].rstrip(":")
+
+    extra = tmp_path / "extra.yaml"
+    extra.write_text("scorers: [tool_correctness]\n", encoding="utf-8")
+    assert _cmd(monkeypatch, db_url, "score", run_id, "--suite", str(extra)).exit_code == 0
+    run = Store(open_engine(db_url)).get_run(run_id)
+    assert {sc.scorer for sc in run.results[0].scores} == {"task_success", "tool_correctness"}
+
+
+def test_judge_scorers_need_a_key_before_running(monkeypatch, db_url, tmp_path):
+    monkeypatch.chdir(tmp_path)  # no .env here: a real key in dyno/.env must not leak in
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    suite = tmp_path / "s.yaml"
+    suite.write_text("agent: example\nscorers: [task_rubric]\ncases:\n  - {id: a, input: q}\n")
+    result = _invoke(monkeypatch, db_url, str(suite))
+    assert result.exit_code != 0 and "ANTHROPIC_API_KEY" in result.output

@@ -123,10 +123,33 @@ class Suite(BaseModel):
         return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
-def load_suite(path: str | Path) -> Suite:
-    path = Path(path)
+def _read_mapping(path: Path) -> dict[str, Any]:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise ValueError(f"{path}: expected a mapping with a 'cases' list")
+        raise ValueError(f"{path}: expected a mapping")
+    return data
+
+
+def load_suite(path: str | Path, cases_path: str | Path | None = None) -> Suite:
+    """A suite file, optionally taking its cases from another file.
+
+    With `cases_path`, the suite file holds only settings (agent, k, scorers) and the
+    cases come from elsewhere, e.g. Scout's golden.yaml, kept in the Scout repo.
+    """
+    path = Path(path)
+    data = _read_mapping(path)
     data.setdefault("name", path.stem)
+    if cases_path is not None:
+        if "cases" in data:
+            raise ValueError(f"{path} has its own cases; drop them or don't pass --cases")
+        data["cases"] = _read_mapping(Path(cases_path)).get("cases")
     return Suite.model_validate(data)
+
+
+def load_scorer_specs(path: str | Path) -> list[ScorerSpec]:
+    """Just the scorers of a suite file (for re-scoring a stored run with them)."""
+    path = Path(path)
+    specs = _read_mapping(path).get("scorers")
+    if not specs:
+        raise ValueError(f"{path} lists no scorers")
+    return Suite.model_validate({"scorers": specs, "cases": [{"id": "x", "input": "x"}]}).scorers

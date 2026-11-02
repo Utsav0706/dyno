@@ -15,12 +15,13 @@ import typer
 
 from dyno import __version__
 from dyno.agent import AgentResult, get_agent
-from dyno.cases import load_suite
+from dyno.cases import ScorerSpec, load_scorer_specs, load_suite
 from dyno.config import get_settings
+from dyno.judge import JudgeError, current_judge, get_judge
 from dyno.log import setup_logging
 from dyno.report import build_report, to_markdown
 from dyno.runner import rescore_run, run_suite
-from dyno.scoring import Score, attempt_passed, build_scorers
+from dyno.scoring import Score, Scorer, attempt_passed, build_scorers
 from dyno.store import Store, open_engine
 
 app = typer.Typer(
@@ -54,14 +55,19 @@ def run(
         list[str] | None, typer.Option("--tags", help="Only cases with any of these tags.")
     ] = None,
     ids: Annotated[list[str] | None, typer.Option("--ids", help="Only these case ids.")] = None,
+    cases: Annotated[
+        Path | None,
+        typer.Option("--cases", exists=True, help="Take the cases from this file instead."),
+    ] = None,
 ) -> None:
     """Run every case in a suite k times; score and store each attempt and its steps.
 
-    --tags and --ids repeat: `--ids a --ids b`.
+    --tags and --ids repeat: `--ids a --ids b`. With --cases, the suite file holds only
+    settings (agent, k, scorers) and the cases come from the other file.
     """
     try:
-        suite = load_suite(suite_path).select(tags=tags, ids=ids)
-        scorers = build_scorers(suite.scorers)
+        suite = load_suite(suite_path, cases).select(tags=tags, ids=ids)
+        scorers = _scorers(suite.scorers)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     agent_name = agent or suite.agent
@@ -111,17 +117,54 @@ def run(
         f"{s.passed} passed, {s.errors} errors, {s.input_tokens}+{s.output_tokens} tokens, "
         f"GBP {s.cost_gbp:.6f}, {s.seconds:.1f}s"
     )
+    _judge_spend()
 
 
 @app.command()
-def score(run_id: Annotated[str, typer.Argument(help="Run id from `dyno run`.")]) -> None:
-    """Re-score a stored run with its own scorer settings (free: the agent isn't called)."""
+def score(
+    run_id: Annotated[str, typer.Argument(help="Run id from `dyno run`.")],
+    suite_path: Annotated[
+        Path | None,
+        typer.Option("--suite", exists=True, help="Use this suite file's scorers instead."),
+    ] = None,
+) -> None:
+    """Re-score a stored run without calling the agent.
+
+    By default with the scorers the run used (free unless they include judges). With
+    --suite, with that file's scorers: e.g. to add judge scores to an existing run.
+    Other scorers' stored scores are kept.
+    """
     try:
-        n = rescore_run(_store(), run_id)
+        scorers = _scorers(load_scorer_specs(suite_path)) if suite_path else None
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    try:
+        n = rescore_run(_store(), run_id, scorers)
     except LookupError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     typer.echo(f"re-scored {n} attempts in run {run_id}")
+    _judge_spend()
+
+
+def _scorers(specs: list[ScorerSpec]) -> list[Scorer]:
+    """Build scorers; if any are judges, check the judge can start before anything runs
+    (a missing API key should stop the command, not turn every score into an error)."""
+    scorers = build_scorers(specs)
+    if any(getattr(s, "uses_judge", False) for s in scorers):
+        try:
+            get_judge()
+        except JudgeError as exc:
+            raise ValueError(f"judge scorers need the judge: {exc}") from exc
+    return scorers
+
+
+def _judge_spend() -> None:
+    judge = current_judge()
+    if judge is not None and judge.calls:
+        typer.echo(
+            f"judges: {judge.calls} calls, GBP {judge.spent_gbp:.6f} ({judge.model})", err=True
+        )
 
 
 class Format(StrEnum):

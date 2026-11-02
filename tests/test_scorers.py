@@ -165,9 +165,9 @@ def test_agent_error_fails_scorers_but_cost_still_reported():
     assert scores["cost_latency"].passed is None  # information, from the real timing
 
 
-def test_scorer_exception_is_a_recorded_failure():
+def test_scorer_exception_is_a_scorer_error_not_a_fail():
     scores = score_attempt([TaskSuccess("regex")], case(expected="(unclosed"), attempt("anything"))
-    assert scores["task_success"].passed is False
+    assert scores["task_success"].passed is None
     assert scores["task_success"].details == {"scorer_error": True}
 
 

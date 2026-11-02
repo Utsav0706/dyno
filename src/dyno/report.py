@@ -24,6 +24,7 @@ class ScorerStats(BaseModel):
     scored: int  # attempts where the scorer applied
     passed: int
     skipped: int  # not applicable
+    errors: int  # the scorer itself failed (e.g. judge API down); not counted as a fail
     pass_rate: float | None
     mean_score: float | None
 
@@ -67,6 +68,7 @@ class Report(BaseModel):
     flaky: list[str]
 
     cost_gbp: float | None
+    judge_cost_gbp: float  # judge spend behind the scores now stored (latest re-score only)
     cost_per_attempt_gbp: float | None
     input_tokens: int
     output_tokens: int
@@ -104,6 +106,8 @@ def build_report(run: Run) -> Report:
     judged = [cr for cr in reliability if cr.attempts]
 
     stats: dict[str, list[tuple[bool | None, float | None]]] = defaultdict(list)
+    scorer_errors: dict[str, int] = defaultdict(int)
+    judge_cost = 0.0
     first_fail: dict[tuple[str, str], str] = {}
     fail_count: dict[tuple[str, str], int] = defaultdict(int)
     for r in results:
@@ -114,6 +118,8 @@ def build_report(run: Run) -> Report:
             first_fail.setdefault(key, r.error)
         for sc in r.scores:
             stats[sc.scorer].append((sc.passed, sc.score))
+            scorer_errors[sc.scorer] += bool(sc.details.get("scorer_error"))
+            judge_cost += (sc.details.get("judge") or {}).get("cost_gbp", 0.0)
             if sc.passed is False and r.error is None:
                 key = (r.case_id, sc.scorer)
                 fail_count[key] += 1
@@ -129,7 +135,8 @@ def build_report(run: Run) -> Report:
                 scorer=name,
                 scored=len(applied),
                 passed=n_pass,
-                skipped=len(rows) - len(applied),
+                skipped=len(rows) - len(applied) - scorer_errors[name],
+                errors=scorer_errors[name],
                 pass_rate=_rate(n_pass, len(applied)),
                 mean_score=sum(numbers) / len(numbers) if numbers else None,
             )
@@ -188,6 +195,7 @@ def build_report(run: Run) -> Report:
         flaky=[cr.case_id for cr in reliability if cr.flaky],
         cost_gbp=sum(costs) if costs else None,
         cost_per_attempt_gbp=sum(costs) / len(costs) if costs else None,
+        judge_cost_gbp=judge_cost,
         input_tokens=sum(r.input_tokens or 0 for r in results),
         output_tokens=sum(r.output_tokens or 0 for r in results),
         latency_p50_s=_seconds(_percentile([r.latency_ms for r in results], 0.5)),
@@ -233,17 +241,18 @@ def to_markdown(r: Report) -> str:
         f"{_pct(r.pass_at_k)} | {_pct(r.pass_hat_k)} | {len(r.flaky)} |",
         "",
         f"Cost: GBP {_num(r.cost_gbp, '.6f')} total, GBP {_num(r.cost_per_attempt_gbp, '.6f')} "
-        f"per attempt, tokens {r.input_tokens} in / {r.output_tokens} out, "
+        f"per attempt (agent), GBP {r.judge_cost_gbp:.6f} judges, "
+        f"tokens {r.input_tokens} in / {r.output_tokens} out, "
         f"latency p50 {_num(r.latency_p50_s, '.1f')}s, p95 {_num(r.latency_p95_s, '.1f')}s",
         "",
         "## Scorers",
         "",
-        "| Scorer | Pass rate | Passed / scored | Mean score | Not applicable |",
-        "|---|---|---|---|---|",
+        "| Scorer | Pass rate | Passed / scored | Mean score | Not applicable | Scorer errors |",
+        "|---|---|---|---|---|---|",
     ]
     lines += [
         f"| {s.scorer} | {_pct(s.pass_rate)} | {s.passed}/{s.scored} | "
-        f"{_num(s.mean_score)} | {s.skipped} |"
+        f"{_num(s.mean_score)} | {s.skipped} | {s.errors} |"
         for s in r.scorers
     ]
     if r.tags:

@@ -1,0 +1,19 @@
+# Settings for running Scout's golden set. The cases stay in the Scout repo, the one place
+# they're kept up to date:
+#   dyno run suites/scout.yaml --cases ../scout/eval/golden.yaml
+#
+# No task_success: Scout's key points are full sentences, which never match word for
+# word; task_rubric (a judge) decides coverage instead. Judges cost about GBP 0.003 per
+# attempt on Haiku 5.5.
+
+name: scout-golden
+agent: scout
+k: 1
+scorers:
+  - task_rubric
+  # save_note results are Scout's own notes, not evidence it was given.
+  - hallucination: {exclude_tools: [save_note]}
+  - quality
+  - tool_correctness
+  - trajectory_efficiency
+  - cost_latency

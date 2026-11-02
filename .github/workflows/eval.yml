@@ -2,9 +2,9 @@
 # a Windows laptop. Manual only: it spends real money (roughly GBP 0.02-0.05 per case).
 # Start it from the Actions tab ("Run workflow").
 #
-# Needs repo secrets ANTHROPIC_API_KEY and TAVILY_API_KEY (Scout uses them; Dyno's
-# deterministic scorers don't). Results: the run's summary page, plus dyno.db, the
-# report (Markdown + JSON) and Scout's log as an artifact.
+# Needs repo secrets ANTHROPIC_API_KEY and TAVILY_API_KEY (Scout uses both; Dyno's judge
+# scorers use the Anthropic key). Settings and scorers: suites/scout.yaml. Results: the
+# run's summary page, plus dyno.db, the report (Markdown + JSON) and Scout's log.
 name: eval
 
 on:
@@ -29,6 +29,10 @@ on:
       scout_ref:
         description: "Scout branch, tag or commit to evaluate"
         default: "main"
+        required: true
+      judge_budget_gbp:
+        description: "Most Dyno's judge scorers may spend (GBP); about 0.003 per attempt"
+        default: "0.50"
         required: true
 
 permissions:
@@ -117,20 +121,22 @@ jobs:
           # Dyno's own store; Scout's DATABASE_URL above is set only for Scout's step.
           DATABASE_URL: sqlite:///dyno.db
           SCOUT_CORPUS_DIR: ${{ github.workspace }}/eval-setup/corpus
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          JUDGE_BUDGET_GBP: ${{ inputs.judge_budget_gbp }}
           # Inputs arrive as environment variables, never pasted into the script, so a
           # crafted input can't inject shell commands.
           TAGS: ${{ inputs.tags }}
           IDS: ${{ inputs.ids }}
           K: ${{ inputs.k }}
         run: |
-          args=(--agent scout --k "$K")
+          args=(--cases scout/eval/golden.yaml --k "$K")
           # "all" means no filter; ids win over tags.
           if [ -n "$IDS" ]; then
             for i in $IDS; do args+=(--ids "$i"); done
           elif [ -n "$TAGS" ] && [ "$TAGS" != "all" ]; then
             for t in $TAGS; do args+=(--tags "$t"); done
           fi
-          dyno-venv/bin/dyno run scout/eval/golden.yaml "${args[@]}" | tee run.txt
+          dyno-venv/bin/dyno run suites/scout.yaml "${args[@]}" | tee run.txt
           run_id="$(tail -n 1 run.txt | awk '{print $2}' | tr -d ':')"
           mkdir -p out
           dyno-venv/bin/dyno report "$run_id" --out out/report.md

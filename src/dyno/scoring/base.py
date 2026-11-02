@@ -112,11 +112,14 @@ def score_attempt(scorers: list[Scorer], case: Case, attempt: Attempt) -> dict[s
             continue
         try:
             scores[scorer.name] = scorer.score(case, attempt)
-        except Exception as exc:  # a bad regex or a broken custom check
-            log.warning("scorer failed", extra={"scorer": scorer.name, "case_id": case.id})
+        except Exception as exc:  # judge API down or over budget, bad regex, broken check
+            # Not applicable, not failed: a scorer's own failure says nothing about the
+            # agent. The report counts these separately, so they can't hide either.
+            log.warning(
+                "scorer failed",
+                extra={"scorer": scorer.name, "case_id": case.id, "error": str(exc)[:200]},
+            )
             scores[scorer.name] = Score(
-                score=0.0,
-                passed=False,
                 explanation=f"scorer error: {type(exc).__name__}: {exc}",
                 details={"scorer_error": True},
             )

@@ -23,8 +23,14 @@ class Settings(BaseSettings):
     # Where runs, cases, results and steps are stored. SQLite by default (one file,
     # nothing to install); any SQLAlchemy URL works, e.g. Postgres.
     database_url: str = "sqlite:///dyno.db"
-    # The judge scorers (from M4) call Claude through this key.
+    # The judge scorers call Claude through this key.
     anthropic_api_key: SecretStr | None = None
+    # Haiku first; a scorer moves to Sonnet only if its kappa against hand labels is < 0.6.
+    judge_model: str = "claude-haiku-5-5"
+    judge_effort: str = "medium"
+    # Most a single dyno command may spend on judge calls; further calls become scorer
+    # errors instead of spending more.
+    judge_budget_gbp: float = 1.0
     log_level: str = "WARNING"
 
     # Agents reached over HTTP (see dyno.agents). 8001/8002: Windows reserves 8000.
