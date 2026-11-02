@@ -5,7 +5,10 @@ A suite file is a list of cases plus optional defaults:
     name: scout-golden          # optional, defaults to the file name
     agent: scout                # optional, `dyno run --agent` overrides it
     k: 3                        # optional, `dyno run --k` overrides it
-    scorers: [task_success]     # optional, used from M2
+    scorers:                    # optional, default: all deterministic scorers
+      - task_success: {mode: contains}
+      - tool_correctness
+      - cost_latency: {max_cost_gbp: 0.05}
     cases:
       - id: refund-policy-003
         input: Can I get a refund after 40 days?
@@ -24,9 +27,12 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+MatchMode = Literal["exact", "contains", "regex"]
 
 
 class Case(BaseModel):
@@ -37,12 +43,30 @@ class Case(BaseModel):
     # A reference answer, a list of key points a correct answer covers (Scout's golden
     # set), or nothing (e.g. "unanswerable" cases, judged by a scorer instead).
     expected: str | list[str] | None = None
+
+    @field_validator("expected", mode="before")
+    @classmethod
+    def _numbers_as_text(cls, v: Any) -> Any:
+        # YAML reads `expected: 42` as an int; compare it as text like any answer.
+        def text(x: Any) -> Any:
+            return str(x) if isinstance(x, int | float) and not isinstance(x, bool) else x
+
+        return [text(x) for x in v] if isinstance(v, list) else text(v)
+
     must_call: list[str] = []
     must_not_call: list[str] = []
     max_steps: int | None = Field(default=None, gt=0)
     tags: list[str] = []
     # Reference documents for the hallucination scorer (M4); optional.
     sources: list[str] = []
+    # How task_success compares `expected` with the answer; None = the suite's setting.
+    match: MatchMode | None = None
+    # "package.module:function" for a custom task_success check (overrides `expected`).
+    check: str | None = None
+
+
+# A scorer by name, or {name: {params}}, e.g. {cost_latency: {max_cost_gbp: 0.05}}.
+ScorerSpec = str | dict[str, dict[str, Any] | None]
 
 
 class Suite(BaseModel):
@@ -51,7 +75,8 @@ class Suite(BaseModel):
     name: str = ""
     agent: str | None = None
     k: int = Field(default=1, gt=0)
-    scorers: list[str] = []
+    # Empty = every deterministic scorer with default settings.
+    scorers: list[ScorerSpec] = []
     cases: list[Case] = Field(min_length=1)
 
     @field_validator("cases")

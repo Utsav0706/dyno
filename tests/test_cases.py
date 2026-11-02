@@ -60,3 +60,8 @@ def test_config_hash_tracks_what_runs():
     assert base.config_hash("a", 1) != _suite(expected="y").config_hash("a", 1)
     renamed = base.model_copy(update={"name": "other"})
     assert renamed.config_hash("a", 1) == base.config_hash("a", 1)
+
+
+def test_numeric_expected_becomes_text():
+    assert _suite(expected=42).cases[0].expected == "42"
+    assert _suite(expected=[1999, "GBP 3.60"]).cases[0].expected == ["1999", "GBP 3.60"]

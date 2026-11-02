@@ -1,8 +1,8 @@
-"""Tables: runs -> cases (a snapshot per run) -> results (one per case attempt) -> steps.
+"""Tables: runs -> cases (a snapshot per run) -> results (one per case attempt) -> steps
+and scores (one per result and scorer).
 
 Cases are copied into every run rather than shared, because case files get edited:
 `compare` must judge each run against the cases it actually ran.
-Scores arrive in M2 as their own table (migration 0002).
 """
 
 from __future__ import annotations
@@ -50,6 +50,9 @@ class Run(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # running | finished | interrupted
     status: Mapped[str] = mapped_column(String(20))
+    # The suite's scorer specs, so `dyno score` re-scores with the same settings.
+    # None (runs from before M2) = the default deterministic scorers.
+    scorers: Mapped[list[Any] | None] = mapped_column(JSON)
 
     cases: Mapped[list[RunCase]] = relationship(back_populates="run", cascade="all, delete")
     results: Mapped[list[Result]] = relationship(
@@ -69,6 +72,9 @@ class RunCase(Base):
     max_steps: Mapped[int | None]
     tags: Mapped[list[str]] = mapped_column(JSON)
     sources: Mapped[list[str]] = mapped_column(JSON)
+    # Column names avoid MATCH and CHECK, which are SQL keywords.
+    match: Mapped[str | None] = mapped_column("match_mode", String(10))
+    check: Mapped[str | None] = mapped_column("check_fn", String(200))
 
     run: Mapped[Run] = relationship(back_populates="cases")
 
@@ -100,6 +106,9 @@ class Result(Base):
     steps: Mapped[list[StepRow]] = relationship(
         back_populates="result", cascade="all, delete", order_by="StepRow.idx"
     )
+    scores: Mapped[list[ScoreRow]] = relationship(
+        back_populates="result", cascade="all, delete-orphan", order_by="ScoreRow.id"
+    )
 
 
 class StepRow(Base):
@@ -119,3 +128,18 @@ class StepRow(Base):
     latency_ms: Mapped[float | None]
 
     result: Mapped[Result] = relationship(back_populates="steps")
+
+
+class ScoreRow(Base):
+    __tablename__ = "scores"
+    __table_args__ = (UniqueConstraint("result_id", "scorer"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    result_id: Mapped[int] = mapped_column(ForeignKey("results.id", ondelete="CASCADE"))
+    scorer: Mapped[str] = mapped_column(String(50))
+    score: Mapped[float | None]
+    passed: Mapped[bool | None]
+    explanation: Mapped[str] = mapped_column(Text)
+    details: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+    result: Mapped[Result] = relationship(back_populates="scores")

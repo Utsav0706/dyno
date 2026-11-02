@@ -1,7 +1,8 @@
 # A small suite for the built-in example agent. Free and deterministic:
 #   dyno run examples/example_suite.yaml --agent example --k 3
 #
-# Some cases are meant to fail once scorers exist (M2), so reports have something to show.
+# Three cases are meant to fail (tagged expected-fail), so reports have something to show.
+# No scorers listed: all deterministic scorers run with default settings.
 
 name: example
 agent: example

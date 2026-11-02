@@ -7,6 +7,7 @@ and its --help can't drift apart, and CliRunner tests it without a subprocess.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
@@ -17,7 +18,9 @@ from dyno.agent import AgentResult, get_agent
 from dyno.cases import load_suite
 from dyno.config import get_settings
 from dyno.log import setup_logging
-from dyno.runner import run_suite
+from dyno.report import build_report, to_markdown
+from dyno.runner import rescore_run, run_suite
+from dyno.scoring import Score, attempt_passed, build_scorers
 from dyno.store import Store, open_engine
 
 app = typer.Typer(
@@ -48,23 +51,34 @@ def run(
         int | None, typer.Option("--k", min=1, help="Attempts per case (default: suite's k).")
     ] = None,
 ) -> None:
-    """Run every case in a suite k times and store each attempt and its steps."""
+    """Run every case in a suite k times; score and store each attempt and its steps."""
     suite = load_suite(suite_path)
     agent_name = agent or suite.agent
     if not agent_name:
         raise typer.BadParameter("no agent: pass --agent or set 'agent' in the suite")
     repeats = k or suite.k
-    store = Store(open_engine(get_settings().database_url))
+    try:
+        scorers = build_scorers(suite.scorers)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    store = _store()
 
     total = len(suite.cases) * repeats
     done = 0
 
-    def progress(case_id: str, attempt: int, result: AgentResult, latency_ms: float) -> None:
+    def progress(
+        case_id: str, attempt: int, result: AgentResult, latency_ms: float, scores: dict[str, Score]
+    ) -> None:
         nonlocal done
         done += 1
-        status = f"error: {result.error}" if result.error else f"{len(result.steps)} steps"
+        verdict = {True: "pass", False: "FAIL", None: "n/a"}[
+            attempt_passed([sc.passed for sc in scores.values()])
+        ]
+        failed = [name for name, sc in scores.items() if sc.passed is False]
+        why = f" ({', '.join(failed)})" if failed else ""
         typer.echo(
-            f"[{done}/{total}] {case_id} #{attempt}  {status}  {latency_ms / 1000:.1f}s", err=True
+            f"[{done}/{total}] {case_id} #{attempt}  {verdict}{why}  {latency_ms / 1000:.1f}s",
+            err=True,
         )
 
     s = run_suite(
@@ -73,13 +87,54 @@ def run(
         agent_name=agent_name,
         k=repeats,
         store=store,
+        scorers=scorers,
         on_attempt=progress,
     )
     typer.echo(
         f"run {s.run_id}: {s.suite} x{s.k} with {s.agent}: {s.attempts} attempts, "
-        f"{s.errors} errors, {s.input_tokens}+{s.output_tokens} tokens, "
+        f"{s.passed} passed, {s.errors} errors, {s.input_tokens}+{s.output_tokens} tokens, "
         f"GBP {s.cost_gbp:.4f}, {s.seconds:.1f}s"
     )
+
+
+@app.command()
+def score(run_id: Annotated[str, typer.Argument(help="Run id from `dyno run`.")]) -> None:
+    """Re-score a stored run with its own scorer settings (free: the agent isn't called)."""
+    try:
+        n = rescore_run(_store(), run_id)
+    except LookupError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"re-scored {n} attempts in run {run_id}")
+
+
+class Format(StrEnum):
+    md = "md"
+    json = "json"
+
+
+@app.command()
+def report(
+    run_id: Annotated[str, typer.Argument(help="Run id from `dyno run`.")],
+    format: Annotated[Format, typer.Option("--format", "-f")] = Format.md,
+    out: Annotated[Path | None, typer.Option("--out", "-o", help="Write to a file.")] = None,
+) -> None:
+    """Report a run: per-scorer pass rates, pass@k / pass^k, cost, tags, failures."""
+    run = _store().get_run(run_id)
+    if run is None:
+        typer.echo(f"no run {run_id!r}", err=True)
+        raise typer.Exit(1)
+    rep = build_report(run)
+    text = to_markdown(rep) if format is Format.md else rep.model_dump_json(indent=2) + "\n"
+    if out:
+        out.write_text(text, encoding="utf-8")
+        typer.echo(f"wrote {out}", err=True)
+    else:
+        typer.echo(text, nl=False)
+
+
+def _store() -> Store:
+    return Store(open_engine(get_settings().database_url))
 
 
 if __name__ == "__main__":

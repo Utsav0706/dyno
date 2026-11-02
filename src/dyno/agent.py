@@ -7,10 +7,11 @@ and by isinstance at runtime).
 
 from __future__ import annotations
 
-import importlib
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
+
+from dyno._imports import load_attr
 
 StepType = Literal["llm_call", "tool_call", "tool_result"]
 
@@ -56,9 +57,7 @@ def get_agent(name: str) -> Agent:
     if ":" not in target:
         known = ", ".join(sorted(_registry()))
         raise ValueError(f"unknown agent {name!r}: use one of {known} or 'module:Attribute'")
-    module_name, attr = target.split(":", 1)
-    factory = getattr(importlib.import_module(module_name), attr)
-    agent = factory()
+    agent = load_attr(target)()
     if not isinstance(agent, Agent):
         raise TypeError(f"{target} has no run(input) method")
     return agent

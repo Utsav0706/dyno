@@ -15,9 +15,10 @@ from alembic.config import Config
 from sqlalchemy import Engine, create_engine, event, select
 from sqlalchemy.orm import Session, selectinload
 
-from dyno.agent import AgentResult
-from dyno.cases import Case
-from dyno.store.models import Result, Run, RunCase, StepRow
+from dyno.agent import AgentResult, Step
+from dyno.cases import Case, ScorerSpec
+from dyno.scoring.base import Attempt, Score
+from dyno.store.models import Result, Run, RunCase, ScoreRow, StepRow
 
 MIGRATIONS = Path(__file__).resolve().parent.parent / "migrations"
 
@@ -67,6 +68,7 @@ class Store:
         config_hash: str,
         dyno_version: str,
         cases: list[Case],
+        scorers: list[ScorerSpec],
     ) -> None:
         with Session(self.engine) as s, s.begin():
             run = Run(
@@ -80,6 +82,7 @@ class Store:
                 dyno_version=dyno_version,
                 started_at=_now(),
                 status="running",
+                scorers=scorers,
             )
             run.cases = [RunCase(case_id=c.id, **c.model_dump(exclude={"id"})) for c in cases]
             s.add(run)
@@ -93,7 +96,9 @@ class Store:
         result: AgentResult,
         latency_ms: float,
         started_at: datetime,
-    ) -> None:
+        scores: dict[str, Score] | None = None,
+    ) -> int:
+        """Store one attempt (and its scores) in one transaction; returns the result id."""
         steps = result.steps
 
         def total(field: str) -> int | float | None:
@@ -116,7 +121,18 @@ class Store:
                 started_at=started_at,
             )
             row.steps = [StepRow(idx=i, **st.model_dump()) for i, st in enumerate(steps)]
+            row.scores = _score_rows(scores or {})
             s.add(row)
+            s.flush()
+            return row.id
+
+    def replace_scores(self, result_id: int, scores: dict[str, Score]) -> None:
+        """Swap in new scores for the scorers given; other scorers' rows stay."""
+        with Session(self.engine) as s, s.begin():
+            row = s.get_one(Result, result_id)
+            row.scores = [sc for sc in row.scores if sc.scorer not in scores]
+            s.flush()  # delete replaced rows before inserting, or the unique key clashes
+            row.scores.extend(_score_rows(scores))
 
     def finish_run(self, run_id: str, status: str = "finished") -> None:
         with Session(self.engine) as s, s.begin():
@@ -133,6 +149,45 @@ class Store:
                 .options(
                     selectinload(Run.cases),
                     selectinload(Run.results).selectinload(Result.steps),
+                    selectinload(Run.results).selectinload(Result.scores),
                 )
             )
             return s.scalars(stmt).one_or_none()
+
+
+def _score_rows(scores: dict[str, Score]) -> list[ScoreRow]:
+    return [ScoreRow(scorer=name, **sc.model_dump()) for name, sc in scores.items()]
+
+
+def case_from_row(row: RunCase) -> Case:
+    return Case(
+        id=row.case_id,
+        input=row.input,
+        expected=row.expected,
+        must_call=row.must_call,
+        must_not_call=row.must_not_call,
+        max_steps=row.max_steps,
+        tags=row.tags,
+        sources=row.sources,
+        match=row.match,  # type: ignore[arg-type]
+        check=row.check,
+    )
+
+
+def attempt_from_row(row: Result) -> Attempt:
+    steps = [
+        Step(
+            type=st.type,  # type: ignore[arg-type]
+            name=st.name,
+            args=st.args,
+            output=st.output,
+            input_tokens=st.input_tokens,
+            output_tokens=st.output_tokens,
+            cost_gbp=st.cost_gbp,
+            latency_ms=st.latency_ms,
+        )
+        for st in row.steps
+    ]
+    return Attempt(
+        final_answer=row.final_answer, steps=steps, error=row.error, latency_ms=row.latency_ms
+    )
