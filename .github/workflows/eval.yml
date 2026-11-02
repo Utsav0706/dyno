@@ -1,0 +1,152 @@
+# Run Dyno against Scout with document search (Postgres + pgvector), which can't run on
+# a Windows laptop. Manual only: it spends real money (roughly GBP 0.02-0.05 per case).
+# Start it from the Actions tab ("Run workflow").
+#
+# Needs repo secrets ANTHROPIC_API_KEY and TAVILY_API_KEY (Scout uses them; Dyno's
+# deterministic scorers don't). Results: the run's summary page, plus dyno.db, the
+# report (Markdown + JSON) and Scout's log as an artifact.
+name: eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "Golden-set tags: ci (5 cases), all (50), or e.g. web docs. Ignored when ids are set"
+        default: "ci"
+        required: false
+      ids:
+        description: "Only these case ids, space-separated (optional; overrides tags)"
+        default: ""
+        required: false
+      k:
+        description: "Attempts per case"
+        default: "1"
+        required: true
+      max_cost_gbp:
+        description: "Scout's spend cap for this run (GBP). Scout reserves 0.20 per job, so new jobs stop once spend passes cap - 0.20"
+        default: "0.30"
+        required: true
+      scout_ref:
+        description: "Scout branch, tag or commit to evaluate"
+        default: "main"
+        required: true
+
+permissions:
+  contents: read
+
+# One eval at a time: two at once would double the spend for no benefit.
+concurrency:
+  group: eval
+  cancel-in-progress: false
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: scout
+          POSTGRES_PASSWORD: scout
+          POSTGRES_DB: scout_eval
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U scout -d scout_eval"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Utsav0706/scout
+          ref: ${{ inputs.scout_ref }}
+          path: scout
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Separate environments: Dyno and Scout only talk over HTTP, as in real use, and
+      # one's dependencies can't break the other's.
+      - name: Install Scout and Dyno
+        run: |
+          python -m venv scout-venv
+          scout-venv/bin/pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          scout-venv/bin/pip install -q -e ./scout
+          python -m venv dyno-venv
+          dyno-venv/bin/pip install -q -e .
+
+      # The embedding and reranker models (~200 MB), so they download once, not per run.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-models-${{ hashFiles('scout/config.yaml') }}
+
+      - name: Prepare Scout (eval config, corpus PDFs)
+        run: scout-venv/bin/python scripts/scout_eval_setup.py scout eval-setup
+
+      - name: Start Scout
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          DATABASE_URL: postgresql+psycopg://scout:scout@localhost:5432/scout_eval
+          CONFIG_PATH: ${{ github.workspace }}/eval-setup/config.eval.yaml
+          JOBS_MODE: inline
+          DAILY_BUDGET_GBP: ${{ inputs.max_cost_gbp }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$TAVILY_API_KEY" ]; then
+            echo "::error::Add the ANTHROPIC_API_KEY and TAVILY_API_KEY repo secrets first."
+            exit 1
+          fi
+          export JWT_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          nohup scout-venv/bin/python scout/scripts/dev_api.py > scout.log 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:8001/health; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "::error::Scout did not start"; cat scout.log; exit 1
+
+      - name: Run Dyno
+        env:
+          # Dyno's own store; Scout's DATABASE_URL above is set only for Scout's step.
+          DATABASE_URL: sqlite:///dyno.db
+          SCOUT_CORPUS_DIR: ${{ github.workspace }}/eval-setup/corpus
+          # Inputs arrive as environment variables, never pasted into the script, so a
+          # crafted input can't inject shell commands.
+          TAGS: ${{ inputs.tags }}
+          IDS: ${{ inputs.ids }}
+          K: ${{ inputs.k }}
+        run: |
+          args=(--agent scout --k "$K")
+          # "all" means no filter; ids win over tags.
+          if [ -n "$IDS" ]; then
+            for i in $IDS; do args+=(--ids "$i"); done
+          elif [ -n "$TAGS" ] && [ "$TAGS" != "all" ]; then
+            for t in $TAGS; do args+=(--tags "$t"); done
+          fi
+          dyno-venv/bin/dyno run scout/eval/golden.yaml "${args[@]}" | tee run.txt
+          run_id="$(tail -n 1 run.txt | awk '{print $2}' | tr -d ':')"
+          mkdir -p out
+          dyno-venv/bin/dyno report "$run_id" --out out/report.md
+          dyno-venv/bin/dyno report "$run_id" --format json --out out/report.json
+
+      - name: Summary
+        if: always()
+        run: cat out/report.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "No report written."
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dyno-eval
+          path: |
+            dyno.db
+            out/
+            scout.log
+          retention-days: 30
+          if-no-files-found: ignore
