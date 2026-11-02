@@ -80,6 +80,10 @@ class TaskRubric:
 
 class ClaimCheck(BaseModel):
     claim: str
+    # About the answer or the search ("the sources don't state X"), not about the world.
+    # Not checked: such a statement can't be supported by a passage, and counting it
+    # would mark down an agent for honestly saying what it couldn't find.
+    meta: bool
     supported: bool
     evidence: str
 
@@ -101,17 +105,19 @@ class Hallucination:
 
     def __init__(
         self,
-        prompt: str = "judge_hallucination_v1",
+        prompt: str = "judge_hallucination_v2",
         max_unsupported_rate: float = 0.1,
         exclude_tools: list[str] | None = None,
-        max_evidence_chars: int = 120_000,
+        max_evidence_chars: int = 300_000,
     ) -> None:
         self.prompt = load_prompt(prompt)
         self.max_rate = max_unsupported_rate
         # Tools whose output is the agent's own writing (e.g. Scout's save_note), not
         # evidence it was given.
         self.exclude_tools = set(exclude_tools or [])
-        # ~30K tokens: bounds the cost of one call (about GBP 0.0025 on Haiku).
+        # ~75K tokens: bounds the cost of one call (about GBP 0.006 on Haiku) and stays
+        # under Haiku 5.5's 100K-token price step. Passages past it are dropped and
+        # counted, so a claim they'd support can show up as unsupported.
         self.max_chars = max_evidence_chars
 
     def evidence(self, case: Case, attempt: Attempt) -> tuple[list[str], int]:
@@ -125,6 +131,8 @@ class Hallucination:
             and s.name not in self.exclude_tools
             and s.args.get("ok", True)
         ]
+        # The same search result or page often comes back more than once: send it once.
+        texts = list(dict.fromkeys(texts))
         kept, used = [], 0
         for i, text in enumerate(texts, start=1):
             if used + len(text) > self.max_chars:
@@ -147,9 +155,11 @@ class Hallucination:
             + "\n</evidence>",
             ClaimChecks,
         )
-        claims = verdict.parsed.claims
+        everything = verdict.parsed.claims
+        claims = [c for c in everything if not c.meta]
         details = {
-            "claims": [c.model_dump() for c in claims],
+            "claims": [c.model_dump() for c in everything],
+            "meta_statements": len(everything) - len(claims),
             "evidence_passages": len(passages),
             "evidence_dropped": dropped,
             "judge": verdict.meta(self.prompt),

@@ -180,9 +180,9 @@ def test_evidence_is_what_the_agent_received():
 def test_hallucination_rate_and_threshold(fake):
     fake.replies[ClaimChecks] = ClaimChecks(
         claims=[
-            ClaimCheck(claim="Launched 1948", supported=True, evidence="E1"),
-            ClaimCheck(claim="Bevan led it", supported=True, evidence="E1"),
-            ClaimCheck(claim="Cost GBP 1bn", supported=False, evidence=""),
+            ClaimCheck(claim="Launched 1948", meta=False, supported=True, evidence="E1"),
+            ClaimCheck(claim="Bevan led it", meta=False, supported=True, evidence="E1"),
+            ClaimCheck(claim="Cost GBP 1bn", meta=False, supported=False, evidence=""),
         ]
     )
     attempt = answer("The NHS ...", tool("web_search", "evidence"))
@@ -234,3 +234,24 @@ def test_judges_are_not_default_and_build_by_name():
     assert names == ["task_rubric", "hallucination", "quality"]
     with pytest.raises(ValueError):
         build_scorers([{"task_rubric": {"prompt": "judge_missing_v1"}}])
+
+
+def test_meta_statements_are_not_counted(fake):
+    fake.replies[ClaimChecks] = ClaimChecks(
+        claims=[
+            ClaimCheck(claim="Began 1 April 1999", meta=False, supported=True, evidence="E1"),
+            ClaimCheck(
+                claim="The sources do not state the rate", meta=True, supported=False, evidence=""
+            ),
+        ]
+    )
+    s = Hallucination().score(Case(id="c", input="q"), answer("x", tool("web_search", "e")))
+    assert s.passed is True and s.explanation == "0/1 claims unsupported"
+    assert s.details["meta_statements"] == 1
+    assert fake.requests[0]["system"] == load_prompt("judge_hallucination_v2").text
+
+
+def test_duplicate_passages_sent_once():
+    steps = tool("web_search", "same page") + tool("web_search", "same page")
+    passages, _ = Hallucination().evidence(Case(id="c", input="q"), answer("a", steps))
+    assert passages == ["[E1] (web_search) same page"]

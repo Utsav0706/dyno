@@ -10,10 +10,11 @@ Not just "was the final answer right?" but: did it use the right tools, in a sen
 number of steps, without making things up, at what cost, and does it pass every time
 or only sometimes?
 
-Status: **M3, Scout and Gearbox adapters**: YAML cases, the `Agent` protocol,
-`dyno run` with k repeats, every attempt and step stored in SQLite, four deterministic
-scorers, pass@k / pass^k, `dyno report`, and HTTP adapters for Scout and Gearbox.
-Next: an eval workflow for Scout's document cases, then LLM judge scorers.
+Status: **M4, judge scorers**: YAML cases, the `Agent` protocol, `dyno run` with k
+repeats, every attempt and step stored in SQLite, four deterministic scorers, three LLM
+judge scorers, pass@k / pass^k, `dyno report`, HTTP adapters for Scout and Gearbox, and
+a GitHub Actions eval for Scout's document cases. Next: the Scout baseline, then judge
+calibration against hand labels.
 One of four connected
 projects: [Scout](https://github.com/Utsav0706/scout) (research agent),
 [Gearbox](https://github.com/Utsav0706/gearbox) (LLM router), Dyno (eval harness) and
@@ -57,6 +58,16 @@ applicable" (for example, no `max_steps` on the case) never counts as a pass or 
 | `tool_correctness` | every `must_call` tool was called and no `must_not_call` tool was |
 | `trajectory_efficiency` | steps (model and tool calls) within `max_steps`; no tool called 3+ times with the same arguments |
 | `cost_latency` | cost (GBP), time and tokens; pass/fail only with `max_cost_gbp` / `max_latency_s` |
+| `task_rubric` (judge) | every expected key point covered, in any wording, and none contradicted; for an `unanswerable` case, says the evidence isn't there without inventing an answer |
+| `hallucination` (judge) | share of the answer's factual claims that the evidence the agent received (its tool results, plus the case's `sources`) doesn't support; passes at <= 10% |
+| `quality` (judge) | correct, helpful and clear, 1-5 each; passes on a mean >= 4 |
+
+Judge scorers call Claude Haiku 5.5 (`ANTHROPIC_API_KEY` in `.env`), cost a fraction of a
+penny per attempt, and stop at `JUDGE_BUDGET_GBP` (default GBP 1 per command). Their
+prompts are versioned files in [src/dyno/prompts/](src/dyno/prompts/), and every judged
+score stores the prompt version, model, tokens, cost and the judge's full verdict. The
+pass rules are in code, not in the prompts. If a judge call fails, that score counts as
+a scorer error, never as an agent failure. Judges only run when a suite lists them.
 
 An attempt passes when every scorer that applied passed. Across the k attempts of a case,
 the report gives **pass@k** (at least one passed), **pass^k** (all passed) and the
@@ -68,6 +79,9 @@ scorers:
   - tool_correctness
   - cost_latency: {max_cost_gbp: 0.05}
 ```
+
+Add scorers to a run you already have, without calling the agent again:
+`dyno score <run_id> --suite suites/scout.yaml`.
 
 ## Plug in an agent
 

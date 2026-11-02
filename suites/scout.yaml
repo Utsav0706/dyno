@@ -3,8 +3,8 @@
 #   dyno run suites/scout.yaml --cases ../scout/eval/golden.yaml
 #
 # No task_success: Scout's key points are full sentences, which never match word for
-# word; task_rubric (a judge) decides coverage instead. Judges cost about GBP 0.003 per
-# attempt on Haiku 5.5.
+# word; task_rubric (a judge) decides coverage instead. Judges cost about GBP 0.005-0.01 per
+# attempt on Haiku 5.5, mostly the hallucination check (it reads every tool result).
 
 name: scout-golden
 agent: scout
