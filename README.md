@@ -46,6 +46,7 @@ inherit from anything:
 ```python
 from dyno.agent import AgentResult, Step
 
+
 class MyAgent:
     def run(self, input: str) -> AgentResult:
         return AgentResult(
