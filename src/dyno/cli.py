@@ -1,5 +1,5 @@
-"""The `dyno` command. Each milestone adds its commands here (run, report, compare,
-gate, cluster, label, calibrate, import-failures).
+"""The `dyno` command: run, score, report, import, label, calibrate (compare, gate,
+cluster and import-failures come later).
 
 Typer, not argparse: commands and options come from type-hinted functions, so the CLI
 and its --help can't drift apart, and CliRunner tests it without a subprocess.
@@ -7,6 +7,7 @@ and its --help can't drift apart, and CliRunner tests it without a subprocess.
 
 from __future__ import annotations
 
+import sys
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
@@ -15,14 +16,18 @@ import typer
 
 from dyno import __version__
 from dyno.agent import AgentResult, get_agent
+from dyno.calibration import calibrate as run_calibration
+from dyno.calibration import to_markdown as calibration_markdown
 from dyno.cases import ScorerSpec, load_scorer_specs, load_suite
 from dyno.config import get_settings
 from dyno.judge import JudgeError, current_judge, get_judge
+from dyno.labelling import all_labels, claim_items, save_label, task_items
 from dyno.log import setup_logging
 from dyno.report import build_report, to_markdown
 from dyno.runner import rescore_run, run_suite
 from dyno.scoring import Score, Scorer, attempt_passed, build_scorers
 from dyno.store import Store, open_engine
+from dyno.store.transfer import import_runs
 
 app = typer.Typer(
     help="Run an agent on test cases, record every step, score it, compare runs, gate CI.",
@@ -190,6 +195,113 @@ def report(
         typer.echo(f"wrote {out}", err=True)
     else:
         typer.echo(text, nl=False)
+
+
+@app.command("import")
+def import_(
+    paths: Annotated[list[Path], typer.Argument(help="Other dyno.db files.", exists=True)],
+) -> None:
+    """Copy runs from other Dyno databases (e.g. CI eval artifacts) into this one."""
+    store = _store()
+    for path in paths:
+        imported, skipped = import_runs(f"sqlite:///{path.resolve().as_posix()}", store)
+        typer.echo(
+            f"{path}: imported {', '.join(imported) or 'nothing'}"
+            + (f"; already here: {', '.join(skipped)}" if skipped else "")
+        )
+
+
+class LabelKind(StrEnum):
+    task = "task"
+    claims = "claims"
+
+
+def _ask(question: str, choices: str) -> str:
+    """One keypress-style answer (then Enter); repeats until it's one of `choices`."""
+    while True:
+        reply = typer.prompt(f"{question} [{'/'.join(choices)}]", default="", show_default=False)
+        reply = reply.strip().lower()[:1]
+        if reply and reply in choices:
+            return reply
+        typer.echo(f"  type one of: {', '.join(choices)}")
+
+
+@app.command()
+def label(
+    kind: Annotated[LabelKind, typer.Argument(help="task: whole answers; claims: single claims.")],
+    runs: Annotated[
+        list[str] | None, typer.Option("--run", help="Only these runs (repeat). Default: all.")
+    ] = None,
+    n: Annotated[int, typer.Option("--n", min=1, help="How many to label this session.")] = 40,
+) -> None:
+    """Hand-label judged items, blind: the judge's verdict is never shown.
+
+    Every label is saved at once: quit with q any time and run it again to carry on.
+    """
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")  # a console that can't show "£" shows "?"
+    store = _store()
+    try:
+        if kind is LabelKind.task:
+            items: list = task_items(store, runs, n)
+        else:
+            items = claim_items(store, runs, n)
+    except LookupError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if not items:
+        typer.echo("Nothing left to label.")
+        return
+    yes_no = {"y": True, "n": False, "u": None}
+    for i, item in enumerate(items, start=1):
+        typer.echo("\n" + "=" * 78)
+        typer.echo(f"[{i}/{len(items)}] {item.case_id} (attempt {item.attempt})\n")
+        if kind is LabelKind.task:
+            typer.echo(f"QUESTION\n  {item.question}\n\nKEY POINTS\n{item.key}\n")
+            typer.echo(f"ANSWER\n{item.answer}\n")
+            task = _ask("Task success: every key point given, none contradicted?", "ynsq")
+            if task == "q":
+                break
+            if task == "s":
+                continue
+            quality = _ask("Quality 4+/5 (correct, helpful, clear)?", "ynq")
+            if quality == "q":
+                break
+            note = typer.prompt("Note (Enter to skip)", default="", show_default=False)
+            save_label(store, item.result_id, "task_rubric", yes_no[task], note=note)
+            save_label(store, item.result_id, "quality", yes_no[quality], note=note)
+        else:
+            typer.echo(f"CLAIM\n  {item.claim}\n\nEVIDENCE")
+            for text in item.excerpts:
+                typer.echo(f"  ---\n  {text}")
+            verdict = _ask("\nDoes this evidence support the claim? (u = unsure)", "ynusq")
+            if verdict == "q":
+                break
+            if verdict == "s":
+                continue
+            note = typer.prompt("Note (Enter to skip)", default="", show_default=False)
+            save_label(
+                store, item.result_id, "hallucination", yes_no[verdict], item=item.claim, note=note
+            )
+    typer.echo("\nSaved. Run `dyno calibrate` to compare with the judge.")
+
+
+@app.command()
+def calibrate(
+    out: Annotated[Path | None, typer.Option("--out", "-o", help="Write to a file.")] = None,
+) -> None:
+    """Cohen's kappa between each judge and your labels, with every disagreement."""
+    results = run_calibration(all_labels(_store()))
+    if not results:
+        typer.echo("No labels yet: run `dyno label task` first.", err=True)
+        raise typer.Exit(1)
+    text = calibration_markdown(results)
+    if out:
+        out.write_text(text, encoding="utf-8")
+        typer.echo(f"wrote {out}", err=True)
+    for c in results:
+        kappa = "n/a" if c.kappa is None else f"{c.kappa:.2f}"
+        status = "trusted" if c.trusted else "BELOW 0.6"
+        typer.echo(f"{c.scorer}: {c.n} labels, kappa {kappa} ({status})")
 
 
 def _store() -> Store:

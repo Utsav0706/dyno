@@ -143,3 +143,21 @@ class ScoreRow(Base):
     details: Mapped[dict[str, Any]] = mapped_column(JSON)
 
     result: Mapped[Result] = relationship(back_populates="scores")
+
+
+class Label(Base):
+    """A human's verdict on one judged thing, for calibrating the judge against."""
+
+    __tablename__ = "labels"
+    __table_args__ = (UniqueConstraint("result_id", "scorer", "item"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    result_id: Mapped[int] = mapped_column(ForeignKey("results.id", ondelete="CASCADE"))
+    scorer: Mapped[str] = mapped_column(String(50))  # the judge this label checks
+    # "" for a whole-answer label; the claim's text for a hallucination claim label.
+    item: Mapped[str] = mapped_column(Text, default="")
+    label: Mapped[bool | None]  # None = the labeller was unsure
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    result: Mapped[Result] = relationship()

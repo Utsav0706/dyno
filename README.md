@@ -83,6 +83,22 @@ scorers:
 Add scorers to a run you already have, without calling the agent again:
 `dyno score <run_id> --suite suites/scout.yaml`.
 
+## Checking the judges against a human
+
+A judge's numbers are only worth something if it agrees with a person. Dyno measures that:
+
+```powershell
+.venv\Scripts\dyno.exe import runs\ci-123\dyno.db      # bring a CI run's database in
+.venv\Scripts\dyno.exe label task                      # you mark answers pass/fail, blind
+.venv\Scripts\dyno.exe label claims                    # and single claims supported or not
+.venv\Scripts\dyno.exe calibrate --out reports\calibration.md
+```
+
+`label` never shows the judge's verdict, saves each label as you go (quit with `q`,
+carry on later), and samples every item the judge failed plus a random share of the
+rest. `calibrate` reports Cohen's kappa per judge (agreement corrected for chance; 0.6
+or more counts as trusted) and lists every disagreement with the judge's reason.
+
 ## Plug in an agent
 
 An agent is anything with a `run(input: str) -> AgentResult` method. It doesn't need to
