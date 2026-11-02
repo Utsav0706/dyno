@@ -1,0 +1,16 @@
+# Settings for running Gearbox on its held-out test prompts. The cases are generated
+# from the Gearbox repo (they come from public benchmarks under their own licences):
+#   py scripts/gearbox_suite.py ../gearbox runs/gearbox_test.yaml
+#   dyno run suites/gearbox.yaml --cases runs/gearbox_test.yaml
+#
+# Needs Gearbox running (port 8002) with Ollama for its small tier. Gearbox spends about
+# GBP 0.05 on the 119 prompts; judges about the same.
+
+name: gearbox-test
+agent: gearbox
+k: 1
+scorers:
+  # Prompts with a gold answer: does the reply give it? (n/a on open-ended prompts)
+  - task_rubric
+  - quality
+  - cost_latency
