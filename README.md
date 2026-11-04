@@ -10,11 +10,12 @@ Not just "was the final answer right?" but: did it use the right tools, in a sen
 number of steps, without making things up, at what cost, and does it pass every time
 or only sometimes?
 
-Status: **M6, calibrated judges**: YAML cases, the `Agent` protocol, `dyno run` with k
+Status: **M7, compare, gate and clusters**: YAML cases, the `Agent` protocol, `dyno run` with k
 repeats, every attempt and step stored in SQLite, four deterministic scorers, three LLM
 judge scorers, pass@k / pass^k, `dyno report`, HTTP adapters for Scout and Gearbox, and
 a GitHub Actions eval for Scout's document cases, a baseline ([reports/baseline](reports/baseline/README.md)) and
-judges calibrated against hand labels. Next: compare runs, CI gate, failure clusters.
+judges calibrated against hand labels, run comparison, a CI gate and failure clustering.
+Next: fix Scout's biggest failure cluster and measure the change.
 One of four connected
 projects: [Scout](https://github.com/Utsav0706/scout) (research agent),
 [Gearbox](https://github.com/Utsav0706/gearbox) (LLM router), Dyno (eval harness) and
@@ -82,6 +83,24 @@ scorers:
 
 Add scorers to a run you already have, without calling the agent again:
 `dyno score <run_id> --suite suites/scout.yaml`.
+
+## Compare runs, gate releases, find failure patterns
+
+```powershell
+.venv\Scripts\dyno.exe compare BASE_RUN NEW_RUN           # metric changes, newly failing cases
+.venv\Scripts\dyno.exe gate NEW_RUN --baseline BASE_RUN    # exit 1 if a pass rate dropped > 2 pts
+.venv\Scripts\dyno.exe cluster RUN [RUN...]               # group failures, name each group
+.venv\Scripts\dyno.exe import-failures prod.jsonl --out runs\new_cases.yaml
+```
+
+`gate` is also a Python function (`from dyno.gate import gate`), so a release script can
+call it directly. `cluster` embeds failure explanations locally (needs
+`pip install -e ".[cluster]"`), groups them with k-means (k chosen by silhouette, at most
+the square root of the number of failures) and asks the judge for a one-line name per
+group. Formats and the Python API: [docs/integration.md](docs/integration.md).
+
+A note on noise: the same Scout code scored 70% task success on 10 questions in one run
+and 47% over three attempts each in another. Gate on runs with `--k 3`.
 
 ## Checking the judges against a human
 

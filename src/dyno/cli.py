@@ -1,5 +1,5 @@
-"""The `dyno` command: run, score, report, import, label, calibrate (compare, gate,
-cluster and import-failures come later).
+"""The `dyno` command: run, score, report, compare, gate, cluster, import,
+import-failures, label, calibrate.
 
 Typer, not argparse: commands and options come from type-hinted functions, so the CLI
 and its --help can't drift apart, and CliRunner tests it without a subprocess.
@@ -19,7 +19,13 @@ from dyno.agent import AgentResult, get_agent
 from dyno.calibration import calibrate as run_calibration
 from dyno.calibration import to_markdown as calibration_markdown
 from dyno.cases import ScorerSpec, load_scorer_specs, load_suite
+from dyno.cluster import cluster_failures
+from dyno.cluster import to_markdown as clusters_markdown
+from dyno.compare import compare_ids
+from dyno.compare import to_markdown as comparison_markdown
 from dyno.config import get_settings
+from dyno.failures import read_failures, to_cases, write_cases
+from dyno.gate import gate
 from dyno.judge import JudgeError, current_judge, get_judge
 from dyno.labelling import all_labels, claim_items, save_label, task_items
 from dyno.log import setup_logging
@@ -302,6 +308,120 @@ def calibrate(
         kappa = "n/a" if c.kappa is None else f"{c.kappa:.2f}"
         status = "trusted" if c.trusted else "BELOW 0.6"
         typer.echo(f"{c.scorer}: {c.n} labels, kappa {kappa} ({status})")
+
+
+@app.command()
+def compare(
+    run_a: Annotated[str, typer.Argument(help="The earlier run (baseline).")],
+    run_b: Annotated[str, typer.Argument(help="The later run.")],
+    format: Annotated[Format, typer.Option("--format", "-f")] = Format.md,
+    out: Annotated[Path | None, typer.Option("--out", "-o", help="Write to a file.")] = None,
+) -> None:
+    """Per-metric changes and newly failing / flaky / passing cases, on shared cases."""
+    try:
+        comparison = compare_ids(_store(), run_a, run_b)
+    except LookupError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    if format is Format.md:
+        text = comparison_markdown(comparison)
+    else:
+        text = comparison.model_dump_json(indent=2) + "\n"
+    _emit(text, out)
+
+
+@app.command("gate")
+def gate_cmd(
+    candidate: Annotated[str, typer.Argument(help="The run to judge.")],
+    baseline: Annotated[str, typer.Option("--baseline", help="The run to compare against.")],
+    max_drop: Annotated[
+        float, typer.Option("--max-drop", help="Largest allowed drop, in percentage points.")
+    ] = 2.0,
+    metric: Annotated[
+        str,
+        typer.Option(help="attempt_pass_rate, pass_at_k, pass_hat_k or a scorer name."),
+    ] = "attempt_pass_rate",
+    no_new_failures: Annotated[
+        bool, typer.Option("--no-new-failures", help="Also fail if any passing case now fails.")
+    ] = False,
+) -> None:
+    """Exit 0 if the candidate holds up against the baseline, 1 if it got worse."""
+    try:
+        result = gate(
+            candidate,
+            baseline,
+            max_drop=max_drop,
+            metric=metric,
+            no_new_failures=no_new_failures,
+            store=_store(),
+        )
+    except LookupError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"{'PASS' if result.passed else 'FAIL'}: {result.reason}")
+    if result.newly_failing:
+        typer.echo(f"newly failing: {', '.join(result.newly_failing)}")
+    raise typer.Exit(0 if result.passed else 1)
+
+
+@app.command()
+def cluster(
+    runs: Annotated[list[str], typer.Argument(help="One or more run ids.")],
+    scorer: Annotated[
+        str | None, typer.Option(help="Only failures of this scorer (default: any).")
+    ] = None,
+    format: Annotated[Format, typer.Option("--format", "-f")] = Format.md,
+    out: Annotated[Path | None, typer.Option("--out", "-o", help="Write to a file.")] = None,
+) -> None:
+    """Group failures by what went wrong and name each group (needs the cluster extra)."""
+    store = _store()
+    loaded = [store.get_run(r) for r in runs]
+    missing = [r for r, run in zip(runs, loaded, strict=True) if run is None]
+    if missing:
+        raise typer.BadParameter(f"no run {', '.join(missing)}")
+    try:
+        result = cluster_failures([r for r in loaded if r is not None], scorer=scorer)
+    except (RuntimeError, JudgeError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    text = (
+        clusters_markdown(result)
+        if format is Format.md
+        else result.model_dump_json(indent=2) + "\n"
+    )
+    _emit(text, out)
+
+
+@app.command("import-failures")
+def import_failures(
+    path: Annotated[
+        Path, typer.Argument(help="Production failures, one JSON per line.", exists=True)
+    ],
+    out: Annotated[Path, typer.Option("--out", "-o", help="Case file to write.")],
+    existing: Annotated[
+        list[Path] | None,
+        typer.Option("--existing", exists=True, help="Skip inputs already in this suite (repeat)."),
+    ] = None,
+) -> None:
+    """Turn logged production failures into new cases (a YAML file for --cases)."""
+    try:
+        failures = read_failures(path)
+        known: set[str] = set()
+        for suite_path in existing or []:
+            known |= {c.input for c in load_suite(suite_path).cases}
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    pairs, dropped = to_cases(failures, known)
+    write_cases(pairs, out)
+    typer.echo(f"{len(pairs)} new cases -> {out} ({dropped} repeats skipped)")
+
+
+def _emit(text: str, out: Path | None) -> None:
+    if out:
+        out.write_text(text, encoding="utf-8")
+        typer.echo(f"wrote {out}", err=True)
+    else:
+        typer.echo(text, nl=False)
 
 
 def _store() -> Store:

@@ -34,7 +34,7 @@ Tools were always right (100%). 5 runs repeated a call with the same arguments 3
 pass@3 60%, pass^3 40% on task success: 2 of the 6 cases that can pass don't pass
 reliably.
 
-## What the failures have in common (first read; clustering comes later)
+## What the failures have in common (first read by hand)
 
 1. **The second hop never happens** (6 of the 10 task failures, all in `both`): Scout
    finds the fact in the documents ("assembled in Coventry") but then says the sources
@@ -42,6 +42,21 @@ reliably.
 2. **A false "not found"**: the answer says a fact is missing although Scout retrieved
    it. In one hotel-cap attempt the answer says there's no London cap while its own
    limitations section mentions GBP 190. Seen in the flaky docs and web cases.
+`dyno cluster` on both Scout runs, all 36 failed attempts ([../clusters-all.md](../clusters-all.md);
+task failures only: [../clusters-task.md](../clusters-task.md)):
+
+| Cluster (named by the judge) | Share |
+|---|---|
+| Says the sources lack key facts that they actually contain | 31% |
+| Answers the core fact but omits the second key detail, claiming sources lack it | 22% |
+| Repeats identical tool calls with the same arguments | 17% |
+| Cites facts and thresholds but fails to draw the final conclusion | 14% |
+| Identifies the chemistry but omits the per-cell voltage | 11% |
+| Reports a spec fact but omits its explanation | 6% |
+
+The first, second and last two clusters share one behaviour: the report stops at "the
+sources don't give X" instead of going to find X. That is the fix target.
+
 3. **Quality was marked down mostly for format** (citation tags, long "Limitations"
    sections) by the first quality judge. Hand labels disagreed, so the judge was
    changed (below); with v2, quality fails track missing or wrong content.

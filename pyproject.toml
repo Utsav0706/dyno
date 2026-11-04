@@ -22,9 +22,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# dyno cluster: local embeddings + k-means. Separate because torch is large.
+cluster = [
+    "sentence-transformers>=3.0",
+    "scikit-learn>=1.5",
+]
 dev = [
     "pytest>=8.3",
     "ruff>=0.8",
+    "scikit-learn>=1.5",  # tests run clustering with a fake embedder
 ]
 
 [project.scripts]

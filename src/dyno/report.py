@@ -93,8 +93,10 @@ def _percentile(values: list[float], q: float) -> float | None:
     return ordered[max(0, math.ceil(q * len(ordered)) - 1)]
 
 
-def build_report(run: Run) -> Report:
-    results = run.results
+def build_report(run: Run, only: set[str] | None = None) -> Report:
+    """`only`: restrict to these case ids (compare/gate use the cases two runs share)."""
+    results = [r for r in run.results if only is None or r.case_id in only]
+    run_cases = [c for c in run.cases if only is None or c.case_id in only]
     outcome = {
         r.id: attempt_passed([sc.passed for sc in r.scores]) for r in results
     }  # result id -> passed / failed / None
@@ -102,7 +104,7 @@ def build_report(run: Run) -> Report:
     by_case: dict[str, list[bool | None]] = defaultdict(list)
     for r in results:
         by_case[r.case_id].append(outcome[r.id])
-    reliability = [case_reliability(c.case_id, by_case[c.case_id]) for c in run.cases]
+    reliability = [case_reliability(c.case_id, by_case[c.case_id]) for c in run_cases]
     judged = [cr for cr in reliability if cr.attempts]
 
     stats: dict[str, list[tuple[bool | None, float | None]]] = defaultdict(list)
@@ -143,7 +145,7 @@ def build_report(run: Run) -> Report:
         )
 
     tag_cases: dict[str, set[str]] = defaultdict(set)
-    for c in run.cases:
+    for c in run_cases:
         for tag in c.tags:
             tag_cases[tag].add(c.case_id)
     tags = []
@@ -185,7 +187,7 @@ def build_report(run: Run) -> Report:
         dyno_version=run.dyno_version,
         started_at=run.started_at,
         finished_at=run.finished_at,
-        cases=len(run.cases),
+        cases=len(run_cases),
         attempts=len(results),
         errors=sum(1 for r in results if r.error is not None),
         attempts_passed=sum(judged_attempts),
