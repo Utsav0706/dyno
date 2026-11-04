@@ -10,11 +10,11 @@ Not just "was the final answer right?" but: did it use the right tools, in a sen
 number of steps, without making things up, at what cost, and does it pass every time
 or only sometimes?
 
-Status: **M4, judge scorers**: YAML cases, the `Agent` protocol, `dyno run` with k
+Status: **M6, calibrated judges**: YAML cases, the `Agent` protocol, `dyno run` with k
 repeats, every attempt and step stored in SQLite, four deterministic scorers, three LLM
 judge scorers, pass@k / pass^k, `dyno report`, HTTP adapters for Scout and Gearbox, and
-a GitHub Actions eval for Scout's document cases. Next: the Scout baseline, then judge
-calibration against hand labels.
+a GitHub Actions eval for Scout's document cases, a baseline ([reports/baseline](reports/baseline/README.md)) and
+judges calibrated against hand labels. Next: compare runs, CI gate, failure clusters.
 One of four connected
 projects: [Scout](https://github.com/Utsav0706/scout) (research agent),
 [Gearbox](https://github.com/Utsav0706/gearbox) (LLM router), Dyno (eval harness) and
@@ -98,6 +98,15 @@ A judge's numbers are only worth something if it agrees with a person. Dyno meas
 carry on later), and samples every item the judge failed plus a random share of the
 rest. `calibrate` reports Cohen's kappa per judge (agreement corrected for chance; 0.6
 or more counts as trusted) and lists every disagreement with the judge's reason.
+
+Current agreement with hand labels (40 Scout answers, 30 claims;
+[reports/calibration.md](reports/calibration.md)):
+
+| Judge (Claude Haiku 5.5) | Cohen's kappa |
+|---|---|
+| task_rubric | 1.00 |
+| quality (v2, after calibration; v1 was 0.56) | 0.95, measured on the labels it was tuned on |
+| hallucination | 0.63 |
 
 ## Plug in an agent
 

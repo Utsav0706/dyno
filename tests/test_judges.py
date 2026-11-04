@@ -217,6 +217,15 @@ def test_quality_mean_and_clamp(fake):
     assert Quality().score(Case(id="c", input="q"), answer("x")).passed is False
 
 
+def test_quality_passes_on_correct_and_helpful_not_clarity(fake):
+    # Calibration: people judged quality on right + answers the question; clarity
+    # mostly tracked format, so it's reported but doesn't decide pass/fail.
+    fake.replies[QualityGrade] = QualityGrade(correct=5, helpful=4, clear=2, reason="dense")
+    s = Quality().score(Case(id="c", input="q"), answer("x"))
+    assert s.passed is True and "clear 2" in s.explanation
+    assert fake.requests[0]["system"] == load_prompt("judge_quality_v2").text
+
+
 # --- plumbing ---
 
 

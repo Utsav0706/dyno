@@ -189,13 +189,16 @@ class QualityGrade(BaseModel):
 
 @register("quality")
 class Quality:
-    """1-5 for correct, helpful and clear; passes when their mean >= min_score."""
+    """1-5 for correct, helpful and clear. Passes when correct and helpful both reach
+    min_score: calibration against hand labels (reports/calibration.md) showed a person
+    judges quality on whether the answer is right and answers the question, while
+    clarity mostly tracked format. Clarity is still scored and reported."""
 
     name: ClassVar[str]
     fails_on_error: ClassVar[bool] = True
     uses_judge: ClassVar[bool] = True  # costs money; checked before a run starts
 
-    def __init__(self, prompt: str = "judge_quality_v1", min_score: float = 4.0) -> None:
+    def __init__(self, prompt: str = "judge_quality_v2", min_score: float = 4.0) -> None:
         self.prompt = load_prompt(prompt)
         self.min_score = min_score
 
@@ -222,7 +225,7 @@ class Quality:
         mean = sum(parts) / 3
         return Score(
             score=(mean - 1) / 4,
-            passed=mean >= self.min_score,
+            passed=parts[0] >= self.min_score and parts[1] >= self.min_score,
             explanation=f"{mean:.1f}/5 (correct {parts[0]}, helpful {parts[1]}, "
             f"clear {parts[2]}): {g.reason}",
             details={"grade": g.model_dump(), "mean": mean, "judge": verdict.meta(self.prompt)},
