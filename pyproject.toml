@@ -27,10 +27,15 @@ cluster = [
     "sentence-transformers>=3.0",
     "scikit-learn>=1.5",
 ]
+# dyno dashboard: a local Streamlit app over the run store.
+dashboard = [
+    "streamlit>=1.40",
+]
 dev = [
     "pytest>=8.3",
     "ruff>=0.8",
     "scikit-learn>=1.5",  # tests run clustering with a fake embedder
+    "streamlit>=1.40",  # dashboard tests (AppTest)
 ]
 
 [project.scripts]

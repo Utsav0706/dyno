@@ -1,4 +1,4 @@
-"""The `dyno` command: run, score, report, compare, gate, cluster, import,
+"""The `dyno` command: run, score, report, compare, gate, cluster, dashboard, import,
 import-failures, label, calibrate.
 
 Typer, not argparse: commands and options come from type-hinted functions, so the CLI
@@ -414,6 +414,24 @@ def import_failures(
     pairs, dropped = to_cases(failures, known)
     write_cases(pairs, out)
     typer.echo(f"{len(pairs)} new cases -> {out} ({dropped} repeats skipped)")
+
+
+@app.command()
+def dashboard(
+    port: Annotated[int, typer.Option(help="Local port.")] = 8501,
+) -> None:
+    """Open the read-only dashboard on the store (needs the dashboard extra)."""
+    import importlib.util
+    import subprocess
+
+    if importlib.util.find_spec("streamlit") is None:
+        typer.echo('the dashboard needs the extra: pip install -e ".[dashboard]"', err=True)
+        raise typer.Exit(1)
+    script = Path(__file__).parent / "dashboard" / "app.py"
+    cmd = [sys.executable, "-m", "streamlit", "run", str(script), "--server.port", str(port)]
+    cmd += ["--server.headless", "true", "--browser.gatherUsageStats", "false"]
+    typer.echo(f"Dyno dashboard on http://localhost:{port} (Ctrl+C to stop)")
+    raise typer.Exit(subprocess.call(cmd))
 
 
 def _emit(text: str, out: Path | None) -> None:

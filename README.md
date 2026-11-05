@@ -103,6 +103,26 @@ group. Formats and the Python API: [docs/integration.md](docs/integration.md).
 A note on noise: the same Scout code scored 70% task success on 10 questions in one run
 and 47% over three attempts each in another. Gate on runs with `--k 3`.
 
+## Dashboard
+
+```powershell
+.venv\Scripts\python.exe -m pip install -e ".[dashboard]"
+.venv\Scripts\dyno.exe dashboard          # http://localhost:8501
+```
+
+A local, read-only Streamlit view of the store:
+
+- **Runs:** every run with its pass rates and cost, and each scorer's pass rate over time
+  for a suite.
+- **Run:** scorers, tags and flaky cases. Click a case to see each attempt's answer,
+  every score with its reason and the judge's full verdict, and the trajectory step by
+  step.
+- **Compare:** two runs side by side, with the gate's verdict for a metric and threshold
+  you pick.
+- **Clusters:** files saved with `dyno cluster RUN --format json --out reports\clusters.json`.
+
+Its numbers come from the same code as `dyno report` and `dyno compare`.
+
 ## Checking the judges against a human
 
 A judge's numbers are only worth something if it agrees with a person. Dyno measures that:

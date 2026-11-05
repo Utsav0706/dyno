@@ -140,6 +140,11 @@ class Store:
             run.status = status
             run.finished_at = _now()
 
+    def list_runs(self) -> list[Run]:
+        """Every run, newest first, without cases or results (cheap; for listings)."""
+        with Session(self.engine, expire_on_commit=False) as s:
+            return list(s.scalars(select(Run).order_by(Run.started_at.desc())))
+
     def get_run(self, run_id: str) -> Run | None:
         """A run with its cases, results and steps loaded (usable after the session)."""
         with Session(self.engine, expire_on_commit=False) as s:
