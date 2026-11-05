@@ -232,3 +232,35 @@ def test_import_failures_cli(monkeypatch, db_url, tmp_path):
         ["import-failures", str(path), "--out", str(out), "--existing", str(EXAMPLE_SUITE)],
     )
     assert result.exit_code == 0 and "1 new cases" in result.stdout and "1 repeats" in result.stdout
+
+
+def test_gate_on_one_scorer_judges_cases_by_that_scorer(store):
+    """A case that only trips another scorer isn't 'newly failing' on task_success."""
+    from dyno.agent import Step
+
+    suite = Suite.model_validate(
+        {
+            "scorers": ["task_success", "tool_correctness"],
+            "cases": [
+                {"id": "a", "input": "qa", "expected": "A"},
+                {"id": "b", "input": "qb", "expected": "B", "must_call": ["calc"]},
+            ],
+        }
+    )
+
+    class Agent:
+        def __init__(self, use_tool):
+            self.use_tool = use_tool
+
+        def run(self, input):
+            steps = [Step(type="tool_call", name="calc")] if self.use_tool else []
+            return AgentResult(final_answer=input[1].upper(), steps=steps)
+
+    base = run_suite(suite, Agent(True), agent_name="x", k=1, store=store).run_id
+    cand = run_suite(suite, Agent(False), agent_name="x", k=1, store=store).run_id
+    on_task = gate(cand, base, metric="task_success", no_new_failures=True, store=store)
+    assert on_task.passed and on_task.newly_failing == []
+    overall = gate(cand, base, max_drop=100, no_new_failures=True, store=store)
+    assert not overall.passed and overall.newly_failing == ["b"]
+    c = compare_ids(store, base, cand, scorer="task_success")
+    assert c.cases_judged_by == "task_success" and c.newly_failing == []

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from dyno.compare import compare_ids
+from dyno.compare import HEADLINE, compare_ids
 from dyno.config import get_settings
 from dyno.store import Store, open_engine
 
@@ -45,7 +45,9 @@ def gate(
     store: Store | None = None,
 ) -> GateResult:
     store = store or Store(open_engine(get_settings().database_url))
-    c = compare_ids(store, baseline, candidate)
+    # Gating on one scorer: newly failing cases are judged by that scorer alone too.
+    scorer = None if metric in HEADLINE else metric
+    c = compare_ids(store, baseline, candidate, scorer)
 
     def result(
         passed: bool,

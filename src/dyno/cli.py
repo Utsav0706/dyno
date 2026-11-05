@@ -314,12 +314,16 @@ def calibrate(
 def compare(
     run_a: Annotated[str, typer.Argument(help="The earlier run (baseline).")],
     run_b: Annotated[str, typer.Argument(help="The later run.")],
+    scorer: Annotated[
+        str | None,
+        typer.Option(help="Judge newly failing/passing cases by this scorer only."),
+    ] = None,
     format: Annotated[Format, typer.Option("--format", "-f")] = Format.md,
     out: Annotated[Path | None, typer.Option("--out", "-o", help="Write to a file.")] = None,
 ) -> None:
     """Per-metric changes and newly failing / flaky / passing cases, on shared cases."""
     try:
-        comparison = compare_ids(_store(), run_a, run_b)
+        comparison = compare_ids(_store(), run_a, run_b, scorer)
     except LookupError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc

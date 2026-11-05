@@ -10,13 +10,16 @@ Not just "was the final answer right?" but: did it use the right tools, in a sen
 number of steps, without making things up, at what cost, and does it pass every time
 or only sometimes?
 
-Status: **M8, first measured improvement**: YAML cases, the `Agent` protocol, `dyno run` with k
+Status: **M9, dashboard and CI gate**: YAML cases, the `Agent` protocol, `dyno run` with k
 repeats, every attempt and step stored in SQLite, four deterministic scorers, three LLM
 judge scorers, pass@k / pass^k, `dyno report`, HTTP adapters for Scout and Gearbox, and
 a GitHub Actions eval for Scout's document cases, a baseline ([reports/baseline](reports/baseline/README.md)) and
-judges calibrated against hand labels, run comparison, a CI gate and failure clustering.
+judges calibrated against hand labels, run comparison, a CI gate and failure clustering,
+a local dashboard and a GitHub Action that gates pull requests.
 First fix: Scout's task success on 10 hard cases went from 47% to 80% at +30% cost
-([reports/m8-before-after.md](reports/m8-before-after.md)). Next: dashboard, CI gate demo, docs.
+([reports/m8-before-after.md](reports/m8-before-after.md)). The gate blocked a Scout
+"cost cut" that passed every unit test, dropped task success from 80% to 40% and cost
+26% more ([reports/m9-gate-demo.md](reports/m9-gate-demo.md)). Next: docs.
 One of four connected
 projects: [Scout](https://github.com/Utsav0706/scout) (research agent),
 [Gearbox](https://github.com/Utsav0706/gearbox) (LLM router), Dyno (eval harness) and

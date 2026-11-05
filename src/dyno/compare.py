@@ -5,7 +5,9 @@ the shared cases, and the comparison says how many were left out: a pass rate ov
 other questions isn't a like-for-like number.
 
 A case "passes" when every judged attempt passed (pass^k), "fails" when none did, and
-is "flaky" in between.
+is "flaky" in between. By default an attempt passes when every scorer passed; with
+`scorer=`, only that scorer counts (so a gate on task_rubric lists the cases whose
+answers got worse, not the ones that also tripped the loop check).
 """
 
 from __future__ import annotations
@@ -47,6 +49,7 @@ class Comparison(BaseModel):
     newly_failing: list[str]  # passed in A, failed in B
     newly_flaky: list[str]  # passed in A, flaky in B
     newly_passing: list[str]  # didn't pass in A, passes in B
+    cases_judged_by: str | None = None  # None = all scorers; else the one scorer used
 
     def metric(self, name: str) -> MetricDelta | None:
         return next((m for m in self.metrics if m.metric == name), None)
@@ -60,13 +63,32 @@ def case_status(cr: CaseReliability) -> str:
     return "flaky" if cr.pass_at_k else "fail"
 
 
+def _status_on(run: Run, scorer: str, ids: set[str]) -> dict[str, str]:
+    """Case status from one scorer's verdicts (not applicable / errors ignored)."""
+    verdicts: dict[str, list[bool]] = {i: [] for i in ids}
+    for r in run.results:
+        if r.case_id in ids:
+            verdicts[r.case_id] += [
+                bool(s.passed) for s in r.scores if s.scorer == scorer and s.passed is not None
+            ]
+    out = {}
+    for case_id, v in verdicts.items():
+        if not v:
+            out[case_id] = "n/a"
+        elif all(v):
+            out[case_id] = "pass"
+        else:
+            out[case_id] = "flaky" if any(v) else "fail"
+    return out
+
+
 def _metrics(rep: Report) -> dict[str, float | None]:
     out: dict[str, float | None] = {m: getattr(rep, m) for m in HEADLINE}
     out.update({s.scorer: s.pass_rate for s in rep.scorers})
     return out
 
 
-def compare_runs(a: Run, b: Run) -> Comparison:
+def compare_runs(a: Run, b: Run, scorer: str | None = None) -> Comparison:
     ids_a = {c.case_id for c in a.cases}
     ids_b = {c.case_id for c in b.cases}
     common = ids_a & ids_b
@@ -74,8 +96,11 @@ def compare_runs(a: Run, b: Run) -> Comparison:
     ma, mb = _metrics(rep_a), _metrics(rep_b)
     names = list(HEADLINE) + sorted((set(ma) | set(mb)) - set(HEADLINE))
 
-    status_a = {cr.case_id: case_status(cr) for cr in rep_a.reliability}
-    status_b = {cr.case_id: case_status(cr) for cr in rep_b.reliability}
+    if scorer is None:
+        status_a = {cr.case_id: case_status(cr) for cr in rep_a.reliability}
+        status_b = {cr.case_id: case_status(cr) for cr in rep_b.reliability}
+    else:
+        status_a, status_b = _status_on(a, scorer, common), _status_on(b, scorer, common)
     order = sorted(common)
     return Comparison(
         run_a=a.id,
@@ -94,15 +119,16 @@ def compare_runs(a: Run, b: Run) -> Comparison:
         newly_passing=[
             c for c in order if status_a[c] in ("fail", "flaky") and status_b[c] == "pass"
         ],
+        cases_judged_by=scorer,
     )
 
 
-def compare_ids(store: Store, run_a: str, run_b: str) -> Comparison:
+def compare_ids(store: Store, run_a: str, run_b: str, scorer: str | None = None) -> Comparison:
     runs = [store.get_run(run_a), store.get_run(run_b)]
     missing = [i for i, r in zip((run_a, run_b), runs, strict=True) if r is None]
     if missing:
         raise LookupError(f"no run {', '.join(missing)}")
-    return compare_runs(runs[0], runs[1])  # type: ignore[arg-type]
+    return compare_runs(runs[0], runs[1], scorer)  # type: ignore[arg-type]
 
 
 def _pct(x: float | None) -> str:
@@ -142,6 +168,7 @@ def to_markdown(c: Comparison) -> str:
         ("Newly flaky", c.newly_flaky),
         ("Newly passing", c.newly_passing),
     ):
-        lines += ["", f"## {title} ({len(ids)})", ""]
+        scope = f", on {c.cases_judged_by}" if c.cases_judged_by else ""
+        lines += ["", f"## {title} ({len(ids)}{scope})", ""]
         lines += [f"- `{i}`" for i in ids] or ["None."]
     return "\n".join(lines) + "\n"

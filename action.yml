@@ -102,6 +102,9 @@ runs:
         if [ -z "$baseline" ]; then echo "::error::no baseline run: use role: baseline first"; exit 1; fi
         flags=(--baseline "$baseline" --max-drop "$MAX_DROP" --metric "$METRIC")
         if [ "$NO_NEW_FAILURES" = true ]; then flags+=(--no-new-failures); fi
+        # On one scorer, list the cases that got worse on that scorer (as the gate does).
+        scope=()
+        case "$METRIC" in attempt_pass_rate|pass_at_k|pass_hat_k) ;; *) scope=(--scorer "$METRIC");; esac
         set +e
         "$DYNO" gate "$CANDIDATE" "${flags[@]}" > "$RUNNER_TEMP/gate.txt"
         status=$?
@@ -112,7 +115,7 @@ runs:
           echo
           tail -n +2 "$RUNNER_TEMP/gate.txt"
           echo
-          "$DYNO" compare "$baseline" "$CANDIDATE" | sed 's/^# /### /'
+          "$DYNO" compare "$baseline" "$CANDIDATE" "${scope[@]}" | sed 's/^# /### /'
         } >> "$GITHUB_STEP_SUMMARY"
         echo "passed=$([ $status -eq 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
         exit $status

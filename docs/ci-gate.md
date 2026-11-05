@@ -28,7 +28,7 @@ how. The action needs Python 3 on the runner and installs Dyno in its own virtua
 | `suite` | (required) | suite YAML: agent, k, scorers (and cases unless `cases` is set) |
 | `cases` | | take the cases from this file instead; use the **base** branch's copy for both runs, so a pull request can't change its own test |
 | `run-args` | | extra `dyno run` options, e.g. `--k 3 --tags ci`; the same for both roles |
-| `metric` | `attempt_pass_rate` | or `pass_at_k`, `pass_hat_k`, a scorer name such as `task_rubric` |
+| `metric` | `attempt_pass_rate` | or `pass_at_k`, `pass_hat_k`, a scorer name such as `task_rubric` (then newly failing cases are judged by that scorer alone) |
 | `max-drop` | `2.0` | largest allowed drop, in percentage points |
 | `no-new-failures` | `false` | also fail if any case that passed on the base now fails |
 | `baseline-run` | | candidate only: compare with this run id instead |
@@ -41,7 +41,9 @@ step's `env`.
 ## Example: Scout
 
 Scout's [`.github/workflows/dyno-gate.yml`](https://github.com/Utsav0706/scout/blob/main/.github/workflows/dyno-gate.yml)
-runs when a pull request gets the label `eval`, so ordinary pull requests cost nothing:
+runs when a pull request gets the label `eval`, so ordinary pull requests cost nothing.
+It blocked a deliberately bad change that passed all of Scout's unit tests
+([reports/m9-gate-demo.md](../reports/m9-gate-demo.md)):
 
 ```yaml
 - uses: Utsav0706/dyno@main
