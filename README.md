@@ -55,7 +55,7 @@ Dyno reports flaky cases and gates on k = 3. Baseline for Scout and Gearbox:
 ## How it works
 
 ```mermaid
-flowchart LR
+flowchart TD
     cases["Cases (YAML)"] --> run["dyno run --k 3"]
     run -->|"run(input), k times"| agent["Agent: in-process or over HTTP"]
     agent -->|"answer + every step"| scorers["Scorers: deterministic + LLM judges"]
