@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  # By hand too (Actions tab), e.g. when GitHub misses a push event.
 
 jobs:
   test:
