@@ -95,7 +95,9 @@ Add scorers to a run you already have, without calling the agent again:
 ```
 
 `gate` is also a Python function (`from dyno.gate import gate`), so a release script can
-call it directly. `cluster` embeds failure explanations locally (needs
+call it directly, and a GitHub Action (`uses: Utsav0706/dyno@main`) that runs the cases
+on a pull request's base and on its code and fails the check if the score drops
+([docs/ci-gate.md](docs/ci-gate.md)). `cluster` embeds failure explanations locally (needs
 `pip install -e ".[cluster]"`), groups them with k-means (k chosen by silhouette, at most
 the square root of the number of failures) and asks the judge for a one-line name per
 group. Formats and the Python API: [docs/integration.md](docs/integration.md).

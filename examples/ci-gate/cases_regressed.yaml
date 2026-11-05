@@ -1,0 +1,16 @@
+# The same case ids with one answer key changed, so the example agent (which can't
+# change between runs) now fails fact-capital: a stand-in for a regressed agent, to
+# check the gate action blocks it.
+cases:
+  - id: math-add
+    input: What is 17 + 25?
+    expected: The answer is 42.
+    must_call: [calculator]
+  - id: math-precedence
+    input: Work out 2 + 3 * 4
+    expected: The answer is 14.
+    must_call: [calculator]
+  - id: fact-capital
+    input: What is the capital of France?
+    expected: Lyon.
+    must_call: [lookup]

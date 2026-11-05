@@ -29,3 +29,44 @@ jobs:
 
       - name: Test
         run: pytest
+
+  # The gate action (action.yml) end to end, free: the example agent, one gate that
+  # should pass and one that should fail.
+  gate-action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: ./
+        with:
+          role: baseline
+          suite: examples/ci-gate/settings.yaml
+          cases: examples/ci-gate/cases.yaml
+
+      - id: same
+        uses: ./
+        with:
+          role: candidate
+          suite: examples/ci-gate/settings.yaml
+          cases: examples/ci-gate/cases.yaml
+          no-new-failures: "true"
+
+      - id: worse
+        continue-on-error: true
+        uses: ./
+        with:
+          role: candidate
+          suite: examples/ci-gate/settings.yaml
+          cases: examples/ci-gate/cases_regressed.yaml
+
+      - name: Check the verdicts
+        env:
+          SAME: ${{ steps.same.outputs.passed }}
+          WORSE: ${{ steps.worse.outcome }}
+        run: |
+          echo "same: passed=$SAME, worse: $WORSE"
+          [ "$SAME" = true ] && [ "$WORSE" = failure ]

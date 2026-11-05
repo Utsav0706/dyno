@@ -1,0 +1,14 @@
+# Three cases the example agent passes.
+cases:
+  - id: math-add
+    input: What is 17 + 25?
+    expected: The answer is 42.
+    must_call: [calculator]
+  - id: math-precedence
+    input: Work out 2 + 3 * 4
+    expected: The answer is 14.
+    must_call: [calculator]
+  - id: fact-capital
+    input: What is the capital of France?
+    expected: Paris.
+    must_call: [lookup]

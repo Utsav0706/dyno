@@ -1,0 +1,118 @@
+# Dyno's CI gate as a reusable GitHub Action: block a pull request whose agent scores
+# worse than the base branch on the same cases, run the same day.
+#
+# Use it twice in one job. Starting the agent is your workflow's job (only your repo
+# knows how); this action runs the cases against whatever is running:
+#
+#   1. start the agent from the base branch
+#   2. uses: Utsav0706/dyno@main   with role: baseline
+#   3. stop it, start the agent from the pull request's code
+#   4. uses: Utsav0706/dyno@main   with role: candidate   -> compares, gates, fails the step
+#
+# Full example and the reasoning: docs/ci-gate.md.
+name: Dyno gate
+description: Run an agent eval twice (base and pull request) and fail if the pull request scores worse.
+
+inputs:
+  role:
+    description: "baseline (run and remember the run id) or candidate (run, compare, gate)"
+    required: true
+  suite:
+    description: Suite YAML file (agent, k, scorers, and cases unless `cases` is set)
+    required: true
+  cases:
+    description: Optional file to take the cases from instead of the suite
+    default: ""
+  run-args:
+    description: "Extra `dyno run` options, e.g. `--k 3 --tags ci`. Use the same for both roles"
+    default: ""
+  max-drop:
+    description: Largest allowed drop in the metric, in percentage points
+    default: "2.0"
+  metric:
+    description: attempt_pass_rate, pass_at_k, pass_hat_k or a scorer name (e.g. task_rubric)
+    default: attempt_pass_rate
+  no-new-failures:
+    description: "true: also fail if any case that passed on the base now fails"
+    default: "false"
+  baseline-run:
+    description: Candidate only; the baseline run id (default the one the baseline role saved)
+    default: ""
+  database:
+    description: Dyno's SQLite file, shared by both roles
+    default: dyno-gate.db
+
+outputs:
+  run-id:
+    description: The run this step made
+    value: ${{ steps.run.outputs.run-id }}
+  passed:
+    description: Candidate only; "true" or "false"
+    value: ${{ steps.gate.outputs.passed }}
+
+runs:
+  using: composite
+  steps:
+    # Its own venv: Dyno's dependencies can't clash with the agent's.
+    - name: Install Dyno
+      shell: bash
+      run: |
+        venv="$RUNNER_TEMP/dyno-venv"
+        if [ ! -x "$venv/bin/dyno" ]; then
+          python3 -m venv "$venv"
+          "$venv/bin/pip" install -q "$GITHUB_ACTION_PATH"
+        fi
+        echo "DYNO=$venv/bin/dyno" >> "$GITHUB_ENV"
+
+    - name: Run the cases (${{ inputs.role }})
+      id: run
+      shell: bash
+      # Inputs go in as environment variables, never pasted into the script, so a crafted
+      # value can't inject shell commands.
+      env:
+        ROLE: ${{ inputs.role }}
+        SUITE: ${{ inputs.suite }}
+        CASES: ${{ inputs.cases }}
+        RUN_ARGS: ${{ inputs.run-args }}
+        DATABASE_URL: sqlite:///${{ inputs.database }}
+      run: |
+        case "$ROLE" in baseline|candidate) ;; *) echo "::error::role must be baseline or candidate"; exit 1;; esac
+        args=("$SUITE")
+        if [ -n "$CASES" ]; then args+=(--cases "$CASES"); fi
+        read -r -a extra <<< "$RUN_ARGS"
+        "$DYNO" run "${args[@]}" "${extra[@]}" | tee "$RUNNER_TEMP/dyno-$ROLE.txt"
+        run_id="$(grep -oE '^run [0-9a-f]+:' "$RUNNER_TEMP/dyno-$ROLE.txt" | head -n 1 | awk '{print $2}' | tr -d ':')"
+        if [ -z "$run_id" ]; then echo "::error::dyno run printed no run id"; exit 1; fi
+        echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+        if [ "$ROLE" = baseline ]; then echo "DYNO_BASELINE_RUN=$run_id" >> "$GITHUB_ENV"; fi
+
+    - name: Compare and gate
+      id: gate
+      if: inputs.role == 'candidate'
+      shell: bash
+      env:
+        CANDIDATE: ${{ steps.run.outputs.run-id }}
+        BASELINE: ${{ inputs.baseline-run }}
+        MAX_DROP: ${{ inputs.max-drop }}
+        METRIC: ${{ inputs.metric }}
+        NO_NEW_FAILURES: ${{ inputs.no-new-failures }}
+        DATABASE_URL: sqlite:///${{ inputs.database }}
+      run: |
+        baseline="${BASELINE:-$DYNO_BASELINE_RUN}"
+        if [ -z "$baseline" ]; then echo "::error::no baseline run: use role: baseline first"; exit 1; fi
+        flags=(--baseline "$baseline" --max-drop "$MAX_DROP" --metric "$METRIC")
+        if [ "$NO_NEW_FAILURES" = true ]; then flags+=(--no-new-failures); fi
+        set +e
+        "$DYNO" gate "$CANDIDATE" "${flags[@]}" > "$RUNNER_TEMP/gate.txt"
+        status=$?
+        set -e
+        cat "$RUNNER_TEMP/gate.txt"
+        {
+          echo "## Dyno gate: $(head -n 1 "$RUNNER_TEMP/gate.txt")"
+          echo
+          tail -n +2 "$RUNNER_TEMP/gate.txt"
+          echo
+          "$DYNO" compare "$baseline" "$CANDIDATE" | sed 's/^# /### /'
+        } >> "$GITHUB_STEP_SUMMARY"
+        echo "passed=$([ $status -eq 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        exit $status

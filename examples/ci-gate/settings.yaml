@@ -1,0 +1,4 @@
+# Settings for testing the gate action in Dyno's own CI (free: the example agent).
+name: ci-gate
+agent: example
+k: 1
