@@ -12,7 +12,8 @@ or only sometimes?
 
 One of four connected projects: [Scout](https://github.com/Utsav0706/scout) (research
 agent), [Gearbox](https://github.com/Utsav0706/gearbox) (LLM router), Dyno (eval
-harness) and Pitwall (LLMOps).
+harness) and Pitwall (LLMOps); they run together as one system in
+[uv-ai-stack](https://github.com/Utsav0706/uv-ai-stack).
 
 ## What it found
 
