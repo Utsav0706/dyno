@@ -5,6 +5,10 @@
 # Needs repo secrets ANTHROPIC_API_KEY and TAVILY_API_KEY (Scout uses both; Dyno's judge
 # scorers use the Anthropic key). Settings and scorers: suites/scout.yaml. Results: the
 # run's summary page, plus dyno.db, the report (Markdown + JSON) and Scout's log.
+#
+# With gearbox_ref set, Scout's model calls go through Gearbox (checked out at that
+# commit and started here) instead of straight to Anthropic: the same golden set, direct
+# vs through Gearbox, is how uv-ai-stack decides Scout's default (integration step I5).
 name: eval
 
 on:
@@ -34,6 +38,10 @@ on:
         description: "Most Dyno's judge scorers may spend (GBP); about 0.003 per attempt"
         default: "0.50"
         required: true
+      gearbox_ref:
+        description: "Route Scout's model calls through Gearbox at this commit (empty: straight to Anthropic)"
+        default: ""
+        required: false
 
 permissions:
   contents: read
@@ -72,6 +80,13 @@ jobs:
           ref: ${{ inputs.scout_ref }}
           path: scout
 
+      - uses: actions/checkout@v4
+        if: inputs.gearbox_ref != ''
+        with:
+          repository: Utsav0706/gearbox
+          ref: ${{ inputs.gearbox_ref }}
+          path: gearbox
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -86,14 +101,43 @@ jobs:
           python -m venv dyno-venv
           dyno-venv/bin/pip install -q -e .
 
+      - name: Install Gearbox
+        if: inputs.gearbox_ref != ''
+        run: |
+          python -m venv gearbox-venv
+          gearbox-venv/bin/pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          gearbox-venv/bin/pip install -q -e ./gearbox
+
       # The embedding and reranker models (~200 MB), so they download once, not per run.
       - uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: hf-models-${{ hashFiles('scout/config.yaml') }}
+          key: hf-models-${{ hashFiles('scout/config.yaml') }}-${{ inputs.gearbox_ref != '' }}
+
+      # Gearbox on SQLite (its request log), port 8002, its own config: Scout's calls are
+      # routed by their task tag (plan/extract/verify -> Haiku, write -> Sonnet).
+      - name: Start Gearbox
+        if: inputs.gearbox_ref != ''
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DATABASE_URL: sqlite:///gearbox_eval.db
+        working-directory: gearbox
+        run: |
+          ../gearbox-venv/bin/python -m alembic upgrade head
+          nohup ../gearbox-venv/bin/python -m gearbox.service > ../gearbox.log 2>&1 &
+          for i in $(seq 1 120); do
+            if curl -sf http://127.0.0.1:8002/health; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "::error::Gearbox did not start"; cat ../gearbox.log; exit 1
 
       - name: Prepare Scout (eval config, corpus PDFs)
-        run: scout-venv/bin/python scripts/scout_eval_setup.py scout eval-setup
+        env:
+          GEARBOX: ${{ inputs.gearbox_ref }}
+        run: |
+          via=()
+          if [ -n "$GEARBOX" ]; then via=(--llm-base-url http://127.0.0.1:8002); fi
+          scout-venv/bin/python scripts/scout_eval_setup.py scout eval-setup "${via[@]}"
 
       - name: Start Scout
         env:
@@ -142,6 +186,11 @@ jobs:
           dyno-venv/bin/dyno report "$run_id" --out out/report.md
           dyno-venv/bin/dyno report "$run_id" --format json --out out/report.json
 
+      # Gearbox's own counts (tiers, models, cost, cache hits) next to Dyno's report.
+      - name: Gearbox metrics
+        if: always() && inputs.gearbox_ref != ''
+        run: curl -s http://127.0.0.1:8002/metrics/ > out/gearbox-metrics.txt || true
+
       - name: Summary
         if: always()
         run: cat out/report.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "No report written."
@@ -149,10 +198,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: dyno-eval
+          name: ${{ inputs.gearbox_ref != '' && 'dyno-eval-via-gearbox' || 'dyno-eval' }}
           path: |
             dyno.db
             out/
             scout.log
+            gearbox.log
           retention-days: 30
           if-no-files-found: ignore
